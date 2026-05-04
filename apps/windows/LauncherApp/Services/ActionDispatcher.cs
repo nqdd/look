@@ -512,23 +512,10 @@ public sealed class ActionDispatcher
         if (!normalized.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
             return normalized;
 
-        try
+        if (ShortcutResolver.TryResolveShortcutTarget(normalized, out string targetPath)
+            && !string.IsNullOrWhiteSpace(targetPath))
         {
-            var shellType = Type.GetTypeFromProgID("WScript.Shell");
-            if (shellType == null)
-                return normalized;
-
-            dynamic? shell = Activator.CreateInstance(shellType);
-            if (shell == null)
-                return normalized;
-
-            dynamic shortcut = shell.CreateShortcut(normalized);
-            string targetPath = shortcut.TargetPath;
-            if (!string.IsNullOrWhiteSpace(targetPath))
-                return NormalizePath(targetPath);
-        }
-        catch
-        {
+            return NormalizePath(targetPath);
         }
 
         return normalized;
