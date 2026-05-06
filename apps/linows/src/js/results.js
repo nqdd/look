@@ -1,0 +1,148 @@
+import { getIcon } from './ipc.js';
+
+const iconCache = new Map();
+
+let currentResults = [];
+let selectedIndex = -1;
+let container = null;
+let onSelectionChange = null;
+
+export function init(containerEl) {
+  container = containerEl;
+}
+
+export function setOnSelectionChange(callback) {
+  onSelectionChange = callback;
+}
+
+export function render(results) {
+  currentResults = results;
+  container.innerHTML = '';
+
+  if (results.length === 0) {
+    container.innerHTML = '<div class="empty-state">No results</div>';
+    selectedIndex = -1;
+    return;
+  }
+
+  results.forEach((result, index) => {
+    const row = createRow(result, index);
+    container.appendChild(row);
+  });
+
+  select(0);
+}
+
+export function getSelected() {
+  if (selectedIndex >= 0 && selectedIndex < currentResults.length) {
+    return currentResults[selectedIndex];
+  }
+  return null;
+}
+
+export function getSelectedIndex() {
+  return selectedIndex;
+}
+
+export function selectNext() {
+  if (currentResults.length === 0) return;
+  select((selectedIndex + 1) % currentResults.length);
+}
+
+export function selectPrev() {
+  if (currentResults.length === 0) return;
+  select((selectedIndex - 1 + currentResults.length) % currentResults.length);
+}
+
+export function select(index) {
+  const prev = container.querySelector('.result-row.selected');
+  if (prev) prev.classList.remove('selected');
+
+  selectedIndex = index;
+
+  const rows = container.querySelectorAll('.result-row');
+  if (rows[index]) {
+    rows[index].classList.add('selected');
+    rows[index].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  if (onSelectionChange) {
+    onSelectionChange(getSelected());
+  }
+}
+
+function createRow(result, index) {
+  const row = document.createElement('div');
+  row.className = 'result-row';
+  row.dataset.index = index;
+
+  // Icon (first letter fallback, async-load real icon)
+  const icon = document.createElement('div');
+  icon.className = 'result-icon';
+  icon.textContent = result.title.charAt(0).toUpperCase();
+  row.appendChild(icon);
+
+  loadIcon(icon, result.kind, result.path, result.id);
+
+  // Text content
+  const text = document.createElement('div');
+  text.className = 'result-text';
+
+  const title = document.createElement('div');
+  title.className = 'result-title';
+  title.textContent = result.title;
+  text.appendChild(title);
+
+  const subtitle = document.createElement('div');
+  subtitle.className = 'result-path';
+  if (result.subtitle) {
+    subtitle.textContent = result.subtitle;
+  } else if (result.kind === 'file' || result.kind === 'folder') {
+    subtitle.textContent = result.path;
+  } else {
+    const kindLabels = { app: 'App', setting: 'Setting' };
+    subtitle.textContent = kindLabels[result.kind] || result.kind;
+  }
+  text.appendChild(subtitle);
+
+  row.appendChild(text);
+
+  row.addEventListener('click', () => {
+    select(index);
+    row.dispatchEvent(new CustomEvent('result-activate', { bubbles: true }));
+  });
+
+  return row;
+}
+
+function loadIcon(iconEl, kind, path, id) {
+  const cacheKey = `${kind}:${path}`;
+
+  // Check JS cache first
+  if (iconCache.has(cacheKey)) {
+    const dataUrl = iconCache.get(cacheKey);
+    if (dataUrl) {
+      applyIcon(iconEl, dataUrl);
+    }
+    return;
+  }
+
+  getIcon(kind, path, id).then((result) => {
+    const dataUrl = result?.data_url || null;
+    iconCache.set(cacheKey, dataUrl);
+    if (dataUrl) {
+      applyIcon(iconEl, dataUrl);
+    }
+  }).catch(() => {
+    iconCache.set(cacheKey, null);
+  });
+}
+
+function applyIcon(iconEl, dataUrl) {
+  const img = document.createElement('img');
+  img.src = dataUrl;
+  img.alt = '';
+  iconEl.textContent = '';
+  iconEl.style.background = 'none';
+  iconEl.appendChild(img);
+}
