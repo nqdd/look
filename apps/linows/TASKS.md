@@ -65,28 +65,28 @@ Based on macOS app as source of truth. Organized by phase.
 ## Phase 3: Clipboard & Commands
 
 ### Screens
-- [ ] Clipboard history view — list of entries with time, char/line count
+- [x] Clipboard history view — list of entries with time, char/line count, preview panel
 - [x] Command mode panel — 5 commands (calc, pomo, kill, shell, sys) with sidebar + shared input
 - [x] Kill confirmation bar — app icon, name, PID, Y/N at bottom
-- [ ] Translation panel — input, language buttons, output, copy/browser actions
+- [x] Translation panel — 3 languages (EN/VI/JA), copy per result, open in browser
 - [ ] Banner notifications (animated toast messages)
 
 ### Features
-- [ ] Clipboard history store (in-memory ring buffer, max 10 entries, 30KB each)
-- [ ] Clipboard monitoring (platform clipboard listener)
-- [ ] `c"` prefix to browse clipboard history
-- [ ] Delete individual clipboard entries
+- [x] Clipboard history store (in-memory ring buffer, max 10 entries, 30KB each, persisted)
+- [x] Clipboard monitoring (arboard polling, skips Look's own writes)
+- [x] `c"` prefix to browse clipboard history
+- [x] Delete individual clipboard entries
 - [x] Command mode toggle (Ctrl+/)
 - [x] Calculator command — full parity with macOS (functions, constants, factorial, %, formatting)
-- [x] Shell command — execute and capture output (<800 chars)
+- [x] Shell command — execute and capture output (<800 chars, 10s timeout)
 - [x] Kill command — running GUI apps list with icons, filter, confirm + kill
 - [x] System info command — structured table (OS, memory, CPU, battery, uptime, disk)
 - [x] Pomodoro timer — configurable sessions, 3 timer styles, idle standby mode, bg music (rodio)
 - [x] Pomo music player — folder picker, shuffle, prev/next/play/pause, auto-advance
 - [x] Context-sensitive hint bar — per-command keyboard hints at bottom
 - [ ] Kill by port (`:3000` syntax)
-- [ ] Translation (`t"` prefix) — web translation via Rust bridge
-- [ ] Language selection (English, Vietnamese, Japanese)
+- [x] Translation (`t"` prefix) — web translation via Google Translate (curl)
+- [x] Language selection (English, Vietnamese, Japanese) — all 3 shown simultaneously
 
 ---
 

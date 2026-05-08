@@ -5,11 +5,13 @@ import * as preview from './components/preview.js';
 import * as picked from './components/picked.js';
 import * as banner from './components/banner.js';
 import * as commands from './screens/commands/index.js';
+import * as translatePanel from './components/translate.js';
 import { load } from './html-loader.js';
 import {
   onWindowShown, getHomeDir, copyFilesToClipboard,
   evalCalc, runShellCommand, getSystemInfo,
   listProcesses, listProcessesOnPort, killProcess, getIcon,
+  copyToClipboard, deleteClipboardEntry,
 } from './ipc.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -21,7 +23,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Hint bar — always at bottom, shared by all screens
   app.insertAdjacentHTML('beforeend',
-    '<div class="hint-bar" id="hint-bar"><span>Enter open \u2022 Ctrl+Enter search web \u2022 Ctrl+P pick \u2022 Ctrl+C copy \u2022 Ctrl+F reveal \u2022 Esc hide</span></div>');
+    '<div class="hint-bar" id="hint-bar"><span>Enter open \u2022 Ctrl+Enter search web \u2022 Ctrl+P pick \u2022 Ctrl+C copy \u2022 Ctrl+F reveal \u2022 Esc hide</span><span class="hint-bar-copy">\u00A9 2026 by <a class="hint-bar-link" href="#">Kunkka</a></span></div>');
 
   // Load command panels into cmd-main
   const cmdMain = document.getElementById('cmd-main');
@@ -40,6 +42,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   const hintBar = document.getElementById('hint-bar');
   const contentArea = document.getElementById('search-content');
 
+  hintBar.querySelector('.hint-bar-link').addEventListener('click', (e) => {
+    e.preventDefault();
+    import('./ipc.js').then(({ openPath }) => {
+      openPath('https://github.com/kunkka19xx', 'browser', '');
+    });
+  });
+
   // Initialize modules
   results.init(resultsList);
   keyboard.init(queryInput);
@@ -54,6 +63,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     onExecuteCommand: executeCommand,
     onGetIcon: getIcon,
   });
+  translatePanel.init(contentArea);
 
   // Expose command mode toggle for keyboard.js
   keyboard.setCommandMode(commands);
@@ -61,8 +71,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Update right panel when selection changes
   results.setOnSelectionChange((item) => {
     if (!results.hasPickedItems()) {
+      previewPanel.hidden = false;
       preview.update(item);
     }
+  });
+
+  // Wire clipboard delete from preview panel
+  preview.setOnClipDelete(() => {
+    search.handleQueryInput(queryInput.value);
   });
 
   // Update right panel when picks change + auto-copy
@@ -94,6 +110,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Search on input
   queryInput.addEventListener('input', (e) => {
     search.handleQueryInput(e.target.value);
+    const h = hintBar.querySelector('span');
+    if (search.isTranslateMode()) {
+      h.textContent = 'Enter translate \u2022 Esc clear';
+      resultsList.hidden = true;
+      previewPanel.hidden = true;
+      if (!translatePanel.isActive()) translatePanel.showPlaceholder();
+    } else if (search.isClipboardMode()) {
+      h.textContent = 'Enter copy \u2022 Delete remove \u2022 Esc clear';
+      resultsList.hidden = false;
+      translatePanel.hide();
+    } else {
+      h.textContent = 'Enter open \u2022 Ctrl+Enter search web \u2022 Ctrl+P pick \u2022 Ctrl+C copy \u2022 Ctrl+F reveal \u2022 Esc hide';
+      resultsList.hidden = false;
+      translatePanel.hide();
+    }
   });
 
   // Click on result row -> open

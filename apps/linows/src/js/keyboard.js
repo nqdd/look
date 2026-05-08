@@ -1,5 +1,7 @@
 import * as results from './components/results.js';
-import { openPath, recordUsage, revealPath, hideWindow, copyFilesToClipboard } from './ipc.js';
+import * as search from './search.js';
+import * as translatePanel from './components/translate.js';
+import { openPath, recordUsage, revealPath, hideWindow, copyFilesToClipboard, copyToClipboard, deleteClipboardEntry } from './ipc.js';
 import * as banner from './components/banner.js';
 
 let queryInput = null;
@@ -80,16 +82,36 @@ function handleKeyDown(e) {
 
     case 'Enter':
       e.preventDefault();
-      if (e.ctrlKey) {
+      if (search.isTranslateMode()) {
+        const text = search.getTranslateText();
+        if (text) translatePanel.perform(text);
+      } else if (search.isClipboardMode()) {
+        copyClipboardEntry();
+      } else if (e.ctrlKey) {
         searchWeb();
       } else {
         openSelected();
       }
       break;
 
+    case 'Delete':
+    case 'Backspace':
+      if (search.isClipboardMode() && e.key === 'Delete') {
+        e.preventDefault();
+        removeClipboardEntry();
+      }
+      break;
+
     case 'Escape':
       e.preventDefault();
-      hideWindow();
+      if (search.isClipboardMode() || search.isTranslateMode()) {
+        queryInput.value = '';
+        search.handleQueryInput('');
+        translatePanel.hide();
+        queryInput.focus();
+      } else {
+        hideWindow();
+      }
       break;
 
     case 'f':
@@ -148,7 +170,8 @@ async function copySelectedPath() {
     if (item.kind === 'file' || item.kind === 'folder') {
       await copyFilesToClipboard([item.path]);
     } else {
-      await navigator.clipboard.writeText(item.path);
+      // Use backend copy so it marks as self-write
+      await copyToClipboard(item.path);
     }
     banner.show('Copied to clipboard', 'success', 1.0);
   } catch (err) {
@@ -164,5 +187,28 @@ async function revealSelected() {
     await revealPath(item.path);
   } catch (err) {
     console.error('Failed to reveal:', err);
+  }
+}
+
+async function copyClipboardEntry() {
+  const item = results.getSelected();
+  if (!item || item.kind !== 'clipboard') return;
+  try {
+    await copyToClipboard(item.clipText);
+    banner.show('Copied to clipboard', 'success', 1.0);
+  } catch (err) {
+    banner.show('Copy failed', 'error', 1.2);
+  }
+}
+
+async function removeClipboardEntry() {
+  const item = results.getSelected();
+  if (!item || item.kind !== 'clipboard') return;
+  try {
+    await deleteClipboardEntry(item.clipIndex);
+    // Re-trigger search to refresh the list
+    search.handleQueryInput(queryInput.value);
+  } catch (err) {
+    console.error('Delete clipboard entry failed:', err);
   }
 }

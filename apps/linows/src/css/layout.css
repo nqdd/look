@@ -64,6 +64,9 @@
 
 /* Hint bar */
 .hint-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 6px var(--content-padding);
   border-top: var(--border-thickness) solid var(--divider-color);
   flex-shrink: 0;
@@ -72,4 +75,22 @@
 .hint-bar span {
   font-size: calc(var(--font-size) - 3px);
   color: var(--font-muted);
+}
+
+.hint-bar-copy {
+  font-size: calc(var(--font-size) - 3px);
+  color: var(--font-muted);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.hint-bar-link {
+  color: var(--font-muted);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.hint-bar-link:hover {
+  color: var(--accent-color);
+  text-decoration: underline;
 }

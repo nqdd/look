@@ -151,7 +151,13 @@ function createRow(result, index) {
   icon.textContent = result.title.charAt(0).toUpperCase();
   row.appendChild(icon);
 
-  loadIcon(icon, result.kind, result.path, result.id);
+  if (result.kind === 'clipboard') {
+    icon.textContent = '\u{1F4CB}';
+    icon.style.fontSize = '16px';
+    icon.style.background = 'var(--control-fill)';
+  } else {
+    loadIcon(icon, result.kind, result.path, result.id);
+  }
 
   // Text content
   const text = document.createElement('div');
@@ -164,7 +170,9 @@ function createRow(result, index) {
 
   const subtitle = document.createElement('div');
   subtitle.className = 'result-path';
-  if (result.subtitle) {
+  if (result.kind === 'clipboard') {
+    subtitle.textContent = result.subtitle;
+  } else if (result.subtitle) {
     subtitle.textContent = result.subtitle;
   } else if (result.kind === 'file' || result.kind === 'folder') {
     subtitle.textContent = result.path;

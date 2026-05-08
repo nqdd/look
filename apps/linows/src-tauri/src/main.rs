@@ -2,12 +2,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod calc;
+mod clipboard;
 mod commands;
 mod music;
 mod platform;
 mod process;
 mod state;
 mod sysinfo;
+mod translate;
 
 use state::AppState;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -65,6 +67,7 @@ fn main() {
         .manage(AppState::new())
         .manage(platform::IconCache::new())
         .setup(|app| {
+            clipboard::start_monitor();
             let app_handle = app.handle().clone();
 
             // Register Alt+Space global hotkey
@@ -147,6 +150,10 @@ fn main() {
             platform::get_icon,
             commands::scan_music_folder,
             commands::pick_folder,
+            translate::translate,
+            clipboard::get_clipboard_history,
+            clipboard::delete_clipboard_entry,
+            clipboard::copy_to_clipboard,
             music::music_play,
             music::music_pause,
             music::music_resume,

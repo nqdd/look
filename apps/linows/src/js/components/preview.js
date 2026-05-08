@@ -1,10 +1,15 @@
-import { getIcon, getFileMeta, getAppVersion } from '../ipc.js';
+import { getIcon, getFileMeta, getAppVersion, deleteClipboardEntry } from '../ipc.js';
 
 let panel = null;
 let currentPath = null;
+let onClipDelete = null;
 
 export function init(panelEl) {
   panel = panelEl;
+}
+
+export function setOnClipDelete(fn) {
+  onClipDelete = fn;
 }
 
 export function update(result) {
@@ -14,11 +19,18 @@ export function update(result) {
     return;
   }
 
-  if (currentPath === result.path) return;
-  currentPath = result.path;
+  // Clipboard items use id as cache key (not path, since all share clipboard://history)
+  const cacheKey = result.kind === 'clipboard' ? result.id : result.path;
+  if (currentPath === cacheKey) return;
+  currentPath = cacheKey;
 
   panel.hidden = false;
   panel.innerHTML = '';
+
+  if (result.kind === 'clipboard') {
+    renderClipboardPreview(result);
+    return;
+  }
 
   // Header: icon + title + badge + size
   const header = document.createElement('div');
@@ -30,7 +42,7 @@ export function update(result) {
   header.appendChild(iconWrap);
 
   getIcon(result.kind, result.path, result.id).then((res) => {
-    if (res?.data_url && currentPath === result.path) {
+    if (res?.data_url && currentPath === cacheKey) {
       const img = document.createElement('img');
       img.src = res.data_url;
       img.alt = '';
@@ -71,6 +83,81 @@ export function update(result) {
   } else {
     renderFileMeta(metaWrap, result, headerSub);
   }
+}
+
+function renderClipboardPreview(result) {
+  // Header row: icon + title/date + Delete button
+  const header = document.createElement('div');
+  header.className = 'preview-header';
+
+  const iconWrap = document.createElement('div');
+  iconWrap.className = 'preview-icon';
+  iconWrap.textContent = '\u{1F4CB}';
+  iconWrap.style.fontSize = '22px';
+  iconWrap.style.background = 'var(--control-fill)';
+  header.appendChild(iconWrap);
+
+  const headerText = document.createElement('div');
+  headerText.className = 'preview-header-text';
+
+  const title = document.createElement('div');
+  title.className = 'preview-title';
+  title.textContent = 'Clipboard item';
+  headerText.appendChild(title);
+
+  const dateSub = document.createElement('div');
+  dateSub.className = 'preview-path';
+  dateSub.textContent = `Captured ${result.clipDateMedium}`;
+  headerText.appendChild(dateSub);
+
+  header.appendChild(headerText);
+
+  // Delete button
+  const delBtn = document.createElement('button');
+  delBtn.className = 'preview-clip-delete';
+  delBtn.innerHTML = '\u{1F5D1} Delete';
+  delBtn.addEventListener('click', async () => {
+    await deleteClipboardEntry(result.clipIndex);
+    if (onClipDelete) onClipDelete();
+  });
+  header.appendChild(delBtn);
+
+  panel.appendChild(header);
+
+  // Badge + counts
+  const badgeRow = document.createElement('div');
+  badgeRow.className = 'preview-header-sub';
+  const badge = document.createElement('span');
+  badge.className = 'preview-badge kind-clipboard';
+  badge.textContent = 'Clipboard';
+  badgeRow.appendChild(badge);
+  const counts = document.createElement('span');
+  counts.className = 'preview-clip-counts';
+  counts.textContent = `${result.clipCharCount} chars  ${result.clipLineCount} lines`;
+  badgeRow.appendChild(counts);
+  panel.appendChild(badgeRow);
+
+  // Preview label
+  const previewLabel = document.createElement('div');
+  previewLabel.className = 'preview-clip-label';
+  previewLabel.textContent = 'Preview';
+  panel.appendChild(previewLabel);
+
+  // Text preview card
+  const previewCard = document.createElement('div');
+  previewCard.className = 'preview-clip-card';
+  const previewText = document.createElement('pre');
+  previewText.className = 'preview-clip-text';
+  previewText.textContent = result.clipText;
+  previewCard.appendChild(previewText);
+  panel.appendChild(previewCard);
+
+  // Info rows
+  const metaWrap = document.createElement('div');
+  metaWrap.className = 'preview-meta';
+  metaWrap.appendChild(infoRow('Kind', 'Clipboard'));
+  metaWrap.appendChild(infoRow('Captured', result.clipDateMedium));
+  panel.appendChild(metaWrap);
 }
 
 function renderAppMeta(metaWrap, result, headerSub) {

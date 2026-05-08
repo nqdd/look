@@ -327,6 +327,7 @@ pub fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
     if paths.is_empty() {
         return Ok(());
     }
+    crate::clipboard::mark_self_write();
     // Percent-encode each path into a valid file:// URI.
     // Paths may contain spaces, #, %, or unicode which would break
     // the x-special/gnome-copied-files clipboard format if left raw.

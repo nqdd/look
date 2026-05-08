@@ -81,6 +81,22 @@ export async function pickFolder() {
   return invoke('pick_folder');
 }
 
+export async function getClipboardHistory(query = '') {
+  return invoke('get_clipboard_history', { query });
+}
+
+export async function deleteClipboardEntry(index) {
+  return invoke('delete_clipboard_entry', { index });
+}
+
+export async function copyToClipboard(text) {
+  return invoke('copy_to_clipboard', { text });
+}
+
+export async function translate(text, targetLang) {
+  return invoke('translate', { text, targetLang });
+}
+
 export async function onWindowShown(callback) {
   return listen('window-shown', callback);
 }
