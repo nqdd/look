@@ -1,9 +1,13 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod calc;
 mod commands;
+mod music;
 mod platform;
+mod process;
 mod state;
+mod sysinfo;
 
 use state::AppState;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -57,6 +61,7 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .manage(platform::IconCache::new())
         .setup(|app| {
@@ -130,10 +135,23 @@ fn main() {
             commands::toggle_window,
             commands::copy_files_to_clipboard,
             commands::get_home_dir,
+            commands::run_shell_command,
             commands::hide_window,
             commands::get_file_meta,
             commands::get_app_version,
+            calc::eval_calc,
+            sysinfo::get_system_info,
+            process::list_processes,
+            process::list_processes_on_port,
+            process::kill_process,
             platform::get_icon,
+            commands::scan_music_folder,
+            commands::pick_folder,
+            music::music_play,
+            music::music_pause,
+            music::music_resume,
+            music::music_stop,
+            music::music_is_finished,
         ])
         .run(tauri::generate_context!())
         .expect("error while running look desktop");
