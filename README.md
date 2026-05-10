@@ -55,15 +55,36 @@ Uninstall:
 
 ```bash
 # Ubuntu/Debian
-sudo dpkg -r look-desktop
+sudo dpkg -r lookapp
 
 # AppImage — just delete the file
 rm Look_*.AppImage
 ```
 
-> **NixOS:** AppImage does not work on NixOS due to the non-FHS filesystem layout. Build from source instead: `cd apps/linows && nix develop -c cargo tauri build`. A flake package (`nix run`) is planned.
+**NixOS (flake):**
 
-More install methods coming soon (AUR, NixOS flake). To build from source, see [apps/linows/BUILDING.md](apps/linows/BUILDING.md).
+```bash
+# Run directly
+nix run github:kunkka19xx/look?dir=apps/linows
+
+# Install to profile
+nix profile install github:kunkka19xx/look?dir=apps/linows
+```
+
+Declarative (NixOS flake):
+
+```nix
+# flake.nix
+inputs.look.url = "github:kunkka19xx/look?dir=apps/linows";
+
+# In your nixosConfigurations modules list:
+modules = [
+  look.nixosModules.default
+  { programs.lookapp.enable = true; }
+];
+```
+
+More install methods coming soon (AUR). To build from source, see [apps/linows/BUILDING.md](apps/linows/BUILDING.md).
 
 <details>
 <summary>Other install options (curl, pin version, update/uninstall)</summary>

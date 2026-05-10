@@ -57,15 +57,15 @@ WEBKIT_DISABLE_COMPOSITING_MODE=1 cargo tauri dev
 
 ## Runtime Dependencies
 
-| Dependency | Purpose |
-|------------|---------|
-| WebKitGTK 4.1 | WebView rendering |
-| GTK 3 | UI toolkit |
-| libsoup 3 | HTTP (WebKitGTK dep) |
-| dbus | System bus |
-| ALSA (libasound) | Audio playback (Pomodoro music) |
-| xdg-desktop-portal | File picker dialogs |
-| xclip / wl-copy | Clipboard file copy |
+| Dependency         | Purpose                         |
+| ------------------ | ------------------------------- |
+| WebKitGTK 4.1      | WebView rendering               |
+| GTK 3              | UI toolkit                      |
+| libsoup 3          | HTTP (WebKitGTK dep)            |
+| dbus               | System bus                      |
+| ALSA (libasound)   | Audio playback (Pomodoro music) |
+| xdg-desktop-portal | File picker dialogs             |
+| xclip / wl-copy    | Clipboard file copy             |
 
 ---
 
@@ -84,20 +84,22 @@ For now, build from source using the instructions above.
 
 ### Ubuntu / Debian (.deb)
 
-**Target:** `sudo dpkg -i look-desktop_*.deb` or download from GitHub Releases.
+**Target:** `sudo dpkg -i lookapp_*.deb` or download from GitHub Releases.
 
 Steps to implement:
+
 1. Generate multi-size icons from `icon.png` (`cargo tauri icon`)
 2. Add `bundle` section to `tauri.conf.json` with deb runtime deps
-3. Create `.desktop` file at `apps/linows/assets/look-desktop.desktop`
+3. Create `.desktop` file at `apps/linows/assets/lookapp.desktop`
 4. Create CI workflow (`.github/workflows/release-linux.yml`, ubuntu-22.04 runner)
 5. Test: `cargo tauri build` → install .deb on Ubuntu → verify launch + hotkey
 
 ### Arch Linux (AUR)
 
-**Target:** `yay -S look-desktop`
+**Target:** `yay -S lookapp`
 
 Steps to implement:
+
 1. Create `apps/linows/packaging/PKGBUILD` (source build from GitHub tarball)
 2. `makedepends`: rust, cargo, cargo-tauri, pkg-config, openssl, librsvg
 3. `depends`: webkit2gtk-4.1, gtk3, libsoup3, alsa-lib, dbus, xdg-desktop-portal, xclip
@@ -108,21 +110,66 @@ Steps to implement:
 
 ### NixOS (flake)
 
-**Target:** `nix run github:kunkka19xx/look#look-desktop`
+**Status:** Available now.
 
-Steps to implement:
-1. Extend `flake.nix` with `packages.default` output
-2. Use `rustPlatform.buildRustPackage` with `cargoLock.lockFile`
-3. Use `wrapGAppsHook` for GTK runtime wrapping
-4. Filter source to `core/` + `apps/linows/` (monorepo path deps)
-5. `postInstall`: install .desktop file + icon
-6. Test: `nix build .#default` from `apps/linows/`
+```bash
+# Run directly
+nix run github:kunkka19xx/look?dir=apps/linows
+
+# Install to profile
+nix profile install github:kunkka19xx/look?dir=apps/linows
+
+# Build locally
+cd apps/linows
+nix build .#default
+./result/bin/lookapp
+```
+
+**Declarative install** (recommended):
+
+```nix
+# flake.nix
+{
+  inputs.look.url = "github:kunkka19xx/look?dir=apps/linows";
+
+  outputs = { nixpkgs, look, ... }: {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      modules = [
+        look.nixosModules.default
+        {
+          programs.lookapp.enable = true;
+          # Binary cache is enabled by default.
+          # To disable: programs.lookapp.cachix = false;
+        }
+      ];
+    };
+  };
+}
+```
+
+That's it — the module installs the package and configures the binary cache automatically.
+
+**Other install methods:**
+
+```nix
+# Use the package directly
+environment.systemPackages = [ inputs.look.packages.${system}.default ];
+
+# Or use the overlay
+nixpkgs.overlays = [ inputs.look.overlays.default ];
+environment.systemPackages = [ pkgs.lookapp ];
+```
+
+For non-NixOS Nix users: `cachix use look` then `nix profile install`.
+
+> **Note:** The NixOS module requires a NixOS system configuration. Home Manager is not currently supported — use `nix profile install` or the overlay instead. Contributions to add Look to [nixpkgs](https://github.com/NixOS/nixpkgs) or a Home Manager module are welcome.
 
 ### AppImage (universal)
 
-**Target:** Download from GitHub Releases, `chmod +x && ./look-desktop_*.AppImage`
+**Target:** Download from GitHub Releases, `chmod +x && ./lookapp_*.AppImage`
 
 Steps to implement:
+
 1. Add `"appimage"` to `bundle.targets` in `tauri.conf.json`
 2. Built automatically alongside .deb by `cargo tauri build`
 3. CI uploads to GitHub Releases
