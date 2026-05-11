@@ -84,6 +84,25 @@ modules = [
 ];
 ```
 
+> **Note:** On GNOME desktops, log out and log back in after the first install so the GNOME Shell extension (used for window focusing and hotkey on Wayland) can load.
+
+**Window manager users (i3, sway, Hyprland, etc.):** Autostart via `.desktop` files only works on full DEs (GNOME, KDE). On standalone WMs, add Look to your config manually:
+
+```bash
+# i3: ~/.config/i3/config
+exec --no-startup-id lookapp
+for_window [class="lookapp"] floating enable, border none
+
+# sway: ~/.config/sway/config
+exec lookapp
+for_window [app_id="lookapp"] floating enable, border none
+
+# Hyprland: ~/.config/hypr/hyprland.conf
+exec-once = lookapp
+windowrulev2 = float, class:lookapp
+windowrulev2 = noborder, class:lookapp
+```
+
 More install methods coming soon (AUR). To build from source, see [apps/linows/BUILDING.md](apps/linows/BUILDING.md).
 
 <details>
