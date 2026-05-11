@@ -79,24 +79,45 @@ pub fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
             format!("file://{encoded}")
         })
         .collect();
-    let uri = format!("copy\n{}", uris.join("\n"));
+    let payload = format!("copy\n{}", uris.join("\n"));
+    let mime = "x-special/gnome-copied-files";
 
-    let script = format!(
-        "echo -n '{}' | xclip -selection clipboard -t x-special/gnome-copied-files 2>/dev/null || \
-         echo -n '{}' | wl-copy -t x-special/gnome-copied-files 2>/dev/null",
-        uri.replace('\'', "'\\''"),
-        uri.replace('\'', "'\\''"),
-    );
-
-    let result = std::process::Command::new("setsid")
-        .args(["sh", "-c", &script])
-        .stdin(std::process::Stdio::null())
+    // Try wl-copy (Wayland) first, then xclip (X11) — no hard dependency on either
+    let result = std::process::Command::new("wl-copy")
+        .args(["-t", mime])
+        .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .spawn();
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                stdin.write_all(payload.as_bytes())?;
+            }
+            child.wait()
+        });
 
-    result.map_err(|e| format!("Failed to copy: {e}"))?;
-    Ok(())
+    if result.is_ok() {
+        return Ok(());
+    }
+
+    let result = std::process::Command::new("xclip")
+        .args(["-selection", "clipboard", "-t", mime])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                stdin.write_all(payload.as_bytes())?;
+            }
+            child.wait()
+        });
+
+    result
+        .map(|_| ())
+        .map_err(|e| format!("Failed to copy files: {e}. Install xclip or wl-clipboard."))
 }
 
 #[tauri::command]

@@ -171,6 +171,7 @@ fn main() {
     builder
         .setup(move |app| {
             AppState::init_app_handle(app);
+            app.state::<AppState>().start_bootstrap();
             clipboard::start_monitor();
             let app_handle = app.handle().clone();
 
@@ -198,6 +199,16 @@ fn main() {
                             return;
                         }
                         toggle_window(&handle);
+                    })?;
+                app.global_shortcut()
+                    .on_shortcut("Alt+Shift+Q", |app, _shortcut, event| {
+                        if event.state
+                            != tauri_plugin_global_shortcut::ShortcutState::Pressed
+                        {
+                            return;
+                        }
+                        eprintln!("look: quit via Alt+Shift+Q");
+                        app.exit(0);
                     })?;
             }
 
@@ -273,6 +284,7 @@ fn main() {
             commands::force_index_refresh,
             commands::toggle_window,
             commands::hide_window,
+            commands::quit_app,
             // Config
             config::get_config,
             config::set_config,
