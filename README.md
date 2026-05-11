@@ -71,17 +71,30 @@ nix run github:kunkka19xx/look?dir=apps/linows
 nix profile install github:kunkka19xx/look?dir=apps/linows
 ```
 
-Declarative (NixOS flake):
+Declarative (NixOS configuration.nix or custom.nix):
 
 ```nix
-# flake.nix
+# flake.nix — add input
 inputs.look.url = "github:kunkka19xx/look?dir=apps/linows";
 
-# In your nixosConfigurations modules list:
-modules = [
-  look.nixosModules.default
-  { programs.lookapp.enable = true; }
-];
+# configuration.nix or custom.nix — add package
+{ pkgs, inputs, ... }:
+{
+  environment.systemPackages = [
+    inputs.look.packages.${pkgs.system}.default
+  ];
+
+  # Optional: use cachix for pre-built binaries (skips ~3 min compile)
+  nix.settings.extra-substituters = [ "https://look.cachix.org" ];
+  nix.settings.extra-trusted-public-keys = [ "look.cachix.org-1:8elPCeSVBzlDZXqIRKBK9GyLIK/Hoe1xiWZF0ir7uX4=" ];
+}
+```
+
+Update to latest release:
+
+```bash
+nix flake update look --flake /path/to/your/flake
+sudo nixos-rebuild switch --flake /path/to/your/flake#hostname
 ```
 
 > **Note:** On GNOME desktops, log out and log back in after the first install so the GNOME Shell extension (used for window focusing and hotkey on Wayland) can load.
