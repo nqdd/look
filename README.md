@@ -71,24 +71,30 @@ nix run github:kunkka19xx/look?dir=apps/linows
 nix profile install github:kunkka19xx/look?dir=apps/linows
 ```
 
-Declarative (NixOS configuration.nix or custom.nix):
+Declarative (NixOS):
 
 ```nix
-# flake.nix — add input
-inputs.look.url = "github:kunkka19xx/look?dir=apps/linows";
+# flake.nix — add input and cachix config
+{
+  nixConfig = {
+    extra-substituters = [ "https://look.cachix.org" ];
+    extra-trusted-public-keys = [ "look.cachix.org-1:8elPCeSVBzlDZXqIRKBK9GyLIK/Hoe1xiWZF0ir7uX4=" ];
+  };
 
-# configuration.nix or custom.nix — add package
+  inputs.look.url = "github:kunkka19xx/look?dir=apps/linows";
+  # ... your other inputs
+}
+
+# configuration.nix — add package
 { pkgs, inputs, ... }:
 {
   environment.systemPackages = [
     inputs.look.packages.${pkgs.system}.default
   ];
-
-  # Optional: use cachix for pre-built binaries (skips ~3 min compile)
-  nix.settings.extra-substituters = [ "https://look.cachix.org" ];
-  nix.settings.extra-trusted-public-keys = [ "look.cachix.org-1:8elPCeSVBzlDZXqIRKBK9GyLIK/Hoe1xiWZF0ir7uX4=" ];
 }
 ```
+
+Pre-built binaries are served via [Cachix](https://look.cachix.org). On first rebuild, nix will ask to trust the cache — say yes. No source compilation needed.
 
 Update to latest release:
 
