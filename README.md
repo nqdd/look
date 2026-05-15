@@ -38,22 +38,45 @@ iex "& { $(irm https://raw.githubusercontent.com/kunkka19xx/look/main/scripts/wi
 
 SmartScreen may warn on first run while reputation builds — click "More info → Run anyway". The launcher's global hotkey (`Alt+Space`) is configurable in Settings → Appearance.
 
-### Linux (under development)
+### Linux
 
-Download `.deb` or `.AppImage` from [Releases](https://github.com/kunkka19xx/look/releases):
+**Arch Linux (AUR):**
 
 ```bash
-# Ubuntu/Debian
-sudo dpkg -i Look_*.deb
+yay -S look-bin
+# or
+paru -S look-bin
+```
 
-# Any distro (AppImage)
+Or without an AUR helper:
+
+```bash
+git clone https://aur.archlinux.org/look-bin.git
+cd look-bin
+makepkg -si
+```
+
+**Ubuntu/Debian (.deb)** — download from [Releases](https://github.com/kunkka19xx/look/releases):
+
+```bash
+sudo dpkg -i Look_*.deb
+```
+
+**Any distro (AppImage):**
+
+```bash
 chmod +x Look_*.AppImage
 ./Look_*.AppImage
 ```
 
+After installing, launch with `lookapp` from a terminal, or search "Look" in your app launcher. Press `Alt+Space` to toggle the window at any time. Look autostarts on login by default (on full DEs like GNOME/KDE).
+
 Uninstall:
 
 ```bash
+# Arch
+yay -R look-bin
+
 # Ubuntu/Debian
 sudo dpkg -r lookapp
 
@@ -123,7 +146,7 @@ exec-once = lookapp
 
 > **Hyprland 0.55+ only.** Focus-existing-window uses the `wlr-foreign-toplevel-management` protocol. Older Hyprland versions relied on the legacy `hyprctl dispatch focuswindow` syntax which was deprecated in 0.55; selecting an already-running app on <0.55 may launch a second instance instead of focusing. Upgrade to 0.55+ for correct behavior.
 
-More install methods coming soon (AUR). To build from source, see [apps/linows/BUILDING.md](apps/linows/BUILDING.md).
+To build from source, see [apps/linows/BUILDING.md](apps/linows/BUILDING.md).
 
 <details>
 <summary>Other install options (curl, pin version, update/uninstall)</summary>
