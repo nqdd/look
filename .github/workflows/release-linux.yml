@@ -174,18 +174,19 @@ jobs:
           chmod 600 /root/.ssh/aur
           ssh-keyscan -t rsa,ecdsa,ed25519 aur.archlinux.org >> /root/.ssh/known_hosts
           export GIT_SSH_COMMAND="ssh -i /root/.ssh/aur -o StrictHostKeyChecking=accept-new"
+          git config --global safe.directory '*'
 
           # Clone AUR repo
-          git clone ssh://aur@aur.archlinux.org/look-bin.git aur-repo
-          cp aur-staging/PKGBUILD aur-repo/PKGBUILD
+          git clone ssh://aur@aur.archlinux.org/look-bin.git /tmp/aur-repo
+          cp aur-staging/PKGBUILD /tmp/aur-repo/PKGBUILD
 
           # Generate .SRCINFO (makepkg can't run as root)
           useradd -m builder
-          chown -R builder:builder aur-repo
-          su builder -c 'cd aur-repo && makepkg --printsrcinfo > .SRCINFO'
+          chown -R builder:builder /tmp/aur-repo
+          su builder -c 'cd /tmp/aur-repo && makepkg --printsrcinfo > .SRCINFO'
 
           # Commit and push
-          cd aur-repo
+          cd /tmp/aur-repo
           git config user.name "$AUR_USERNAME"
           git config user.email "nobita079x@gmail.com"
           git add PKGBUILD .SRCINFO
