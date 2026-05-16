@@ -7,16 +7,6 @@ mod clipboard;
 mod commands;
 mod config;
 mod files;
-#[cfg(target_os = "linux")]
-mod linux_gnome_ext;
-#[cfg(target_os = "linux")]
-mod linux_transparency;
-#[cfg(target_os = "linux")]
-mod linux_wayland_shortcut;
-#[cfg(target_os = "linux")]
-mod linux_window_focus;
-#[cfg(target_os = "linux")]
-mod linux_wlr_focus;
 mod music;
 mod platform;
 mod process;
@@ -45,14 +35,14 @@ fn now_ms() -> u64 {
 }
 
 fn supports_transparency() -> bool {
-    #[cfg(not(target_os = "linux"))]
-    {
-        return true;
-    }
-
     #[cfg(target_os = "linux")]
     {
-        linux_transparency::has_compositor()
+        platform::linux::transparency::has_compositor()
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
     }
 }
 
@@ -83,7 +73,7 @@ fn toggle_window(app_handle: &tauri::AppHandle) {
     };
     if window.is_visible().unwrap_or(false) {
         #[cfg(target_os = "linux")]
-        linux_window_focus::notify_hidden();
+        platform::linux::window_focus::notify_hidden();
         let _ = window.hide();
     } else if now_ms() - LAST_AUTO_HIDDEN_AT.load(Ordering::Relaxed) > 200 {
         // Only show if auto-hide didn't JUST fire.
@@ -97,7 +87,7 @@ fn toggle_window(app_handle: &tauri::AppHandle) {
         // recenter AFTER show. Desktop environments (GNOME, KDE, …) work
         // best with recenter BEFORE show to avoid a visible jump.
         #[cfg(target_os = "linux")]
-        let tiling = platform::is_tiling_wm();
+        let tiling = platform::linux::wm::is_tiling_wm();
         #[cfg(not(target_os = "linux"))]
         let tiling = false;
 
@@ -114,9 +104,9 @@ fn toggle_window(app_handle: &tauri::AppHandle) {
         // On Linux/X11, bypass Mutter's focus-stealing prevention
         // by bumping _NET_WM_USER_TIME before activation.
         #[cfg(target_os = "linux")]
-        if !linux_transparency::is_wayland() {
-            linux_window_focus::activate_self();
-            linux_window_focus::notify_shown();
+        if !platform::linux::transparency::is_wayland() {
+            platform::linux::window_focus::activate_self();
+            platform::linux::window_focus::notify_shown();
         }
 
         let _ = window.set_focus();
@@ -165,7 +155,7 @@ fn recenter_window(window: &tauri::WebviewWindow) {
 
 #[cfg(target_os = "linux")]
 fn is_wayland() -> bool {
-    linux_transparency::is_wayland()
+    platform::linux::transparency::is_wayland()
 }
 
 /// Set dev-mode config and database paths so dev doesn't pollute production.
@@ -320,11 +310,11 @@ fn register_shortcuts(
                 .split(':')
                 .any(|s| s.trim().eq_ignore_ascii_case("GNOME"))
             {
-                linux_gnome_ext::ensure_installed();
+                platform::linux::gnome_ext::ensure_installed();
             }
 
             let handle = app_handle.clone();
-            linux_wayland_shortcut::start(move || {
+            platform::linux::wayland_shortcut::start(move || {
                 toggle_window(&handle);
             });
         }
@@ -354,9 +344,9 @@ fn register_shortcuts(
 /// Cache Look's X11 window ID and start monitoring _NET_ACTIVE_WINDOW for auto-hide.
 #[cfg(target_os = "linux")]
 fn setup_x11_focus_monitor(app: &tauri::App) {
-    linux_window_focus::cache_self_window();
+    platform::linux::window_focus::cache_self_window();
     let window = app.get_webview_window("main").expect("main window missing");
-    linux_window_focus::start_active_window_monitor(move || {
+    platform::linux::window_focus::start_active_window_monitor(move || {
         if now_ms() - LAST_SHOWN_AT.load(Ordering::Relaxed) > 300 {
             LAST_AUTO_HIDDEN_AT.store(now_ms(), Ordering::Relaxed);
             let _ = window.hide();
@@ -389,11 +379,11 @@ fn setup_window_events(window: &tauri::WebviewWindow) {
             // handled entirely by the X11 active-window monitor instead.
             // TODO: add Wayland auto-hide when Wayland support is added.
             #[cfg(not(target_os = "linux"))]
-            tauri::WindowEvent::Focused(false) => {
-                if now_ms() - LAST_SHOWN_AT.load(Ordering::Relaxed) > 300 {
-                    LAST_AUTO_HIDDEN_AT.store(now_ms(), Ordering::Relaxed);
-                    let _ = w.hide();
-                }
+            tauri::WindowEvent::Focused(false)
+                if now_ms() - LAST_SHOWN_AT.load(Ordering::Relaxed) > 300 =>
+            {
+                LAST_AUTO_HIDDEN_AT.store(now_ms(), Ordering::Relaxed);
+                let _ = w.hide();
             }
             _ => {}
         }
@@ -527,12 +517,12 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building look desktop")
-        .run(|_app, event| {
+        .run(|_app, _event| {
             #[cfg(target_os = "linux")]
-            if let tauri::RunEvent::Exit = event
+            if let tauri::RunEvent::Exit = _event
                 && is_wayland()
             {
-                linux_wayland_shortcut::cleanup_keybinding();
+                platform::linux::wayland_shortcut::cleanup_keybinding();
             }
         });
 }

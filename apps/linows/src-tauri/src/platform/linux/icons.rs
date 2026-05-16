@@ -1,58 +1,8 @@
-use serde::Serialize;
-use std::collections::HashMap;
+//! Linux icon resolution via XDG / freedesktop conventions.
+
+use crate::platform::shared::read_icon_file;
 use std::fs;
 use std::path::Path;
-use std::sync::Mutex;
-use tauri::State;
-
-pub struct IconCache(pub Mutex<HashMap<String, Option<String>>>);
-
-impl IconCache {
-    pub fn new() -> Self {
-        Self(Mutex::new(HashMap::new()))
-    }
-}
-
-#[derive(Serialize)]
-pub struct IconResult {
-    pub data_url: Option<String>,
-}
-
-#[tauri::command]
-pub fn get_icon(
-    cache: State<'_, IconCache>,
-    kind: String,
-    path: String,
-    id: Option<String>,
-) -> IconResult {
-    let key = format!("{kind}:{path}");
-
-    {
-        let map = cache.0.lock().unwrap();
-        if let Some(cached) = map.get(&key) {
-            return IconResult {
-                data_url: cached.clone(),
-            };
-        }
-    }
-
-    let data_url = resolve_icon(&kind, &path, id.as_deref());
-
-    {
-        let mut map = cache.0.lock().unwrap();
-        map.insert(key, data_url.clone());
-    }
-
-    IconResult { data_url }
-}
-
-fn resolve_icon(kind: &str, path: &str, id: Option<&str>) -> Option<String> {
-    match kind {
-        "app" => resolve_app_icon(path, id),
-        "folder" => resolve_themed_icon("folder"),
-        _ => resolve_file_icon(path),
-    }
-}
 
 // --- XDG data directories ---
 
@@ -97,7 +47,7 @@ fn xdg_data_dirs() -> Vec<String> {
 
 // --- App icons ---
 
-fn resolve_app_icon(exec_path: &str, id: Option<&str>) -> Option<String> {
+pub(crate) fn resolve_app_icon(exec_path: &str, id: Option<&str>) -> Option<String> {
     // Try direct .desktop lookup from id (most reliable)
     if let Some(id) = id
         && let Some(desktop_path) = id.strip_prefix("app:")
@@ -230,7 +180,7 @@ fn parse_desktop_icon_if_match(desktop_path: &str, bin_name: &str) -> Option<Str
 
 // --- File icons ---
 
-fn resolve_file_icon(path: &str) -> Option<String> {
+pub(crate) fn resolve_file_icon(path: &str) -> Option<String> {
     let ext = Path::new(path).extension()?.to_str()?.to_lowercase();
     let icon_name = mime_icon_name(&ext);
     resolve_themed_icon(icon_name)
@@ -263,7 +213,7 @@ fn mime_icon_name(ext: &str) -> &str {
 
 // --- Freedesktop icon theme lookup ---
 
-fn resolve_themed_icon(name: &str) -> Option<String> {
+pub(crate) fn resolve_themed_icon(name: &str) -> Option<String> {
     if name.starts_with('/') {
         return read_icon_file(name);
     }
@@ -341,141 +291,4 @@ fn detect_gtk_icon_theme() -> Option<String> {
     }
 
     None
-}
-
-// --- Platform detection & window effects ---
-
-#[derive(Serialize)]
-pub struct PlatformInfo {
-    pub os: String,
-    pub has_compositor: bool,
-    /// Compositor name when known ("hyprland", "sway", "gnome", "kde", ...).
-    /// Exposed to the frontend so CSS can branch on compositor-specific bugs
-    /// (e.g. WebKitGTK backdrop-filter glitches on Hyprland).
-    pub compositor: Option<String>,
-}
-
-#[tauri::command]
-pub fn get_platform() -> PlatformInfo {
-    let os = std::env::consts::OS.to_string();
-
-    #[cfg(target_os = "linux")]
-    let has_compositor = crate::linux_transparency::has_compositor();
-
-    #[cfg(not(target_os = "linux"))]
-    let has_compositor = true;
-
-    #[cfg(target_os = "linux")]
-    let compositor = detect_compositor();
-
-    #[cfg(not(target_os = "linux"))]
-    let compositor: Option<String> = None;
-
-    PlatformInfo {
-        os,
-        has_compositor,
-        compositor,
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn detect_compositor() -> Option<String> {
-    if std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok() {
-        return Some("hyprland".into());
-    }
-    if std::env::var("SWAYSOCK").is_ok() {
-        return Some("sway".into());
-    }
-    if std::env::var("I3SOCK").is_ok() {
-        return Some("i3".into());
-    }
-    // XDG_CURRENT_DESKTOP can be colon-separated ("ubuntu:GNOME", "pop:GNOME").
-    // Prefer a recognised desktop name over distro prefixes.
-    const KNOWN: &[&str] = &[
-        "gnome", "kde", "cinnamon", "xfce", "lxqt", "mate", "budgie", "deepin", "pantheon",
-        "cosmic",
-    ];
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-    for seg in desktop.split(':') {
-        let s = seg.trim().to_ascii_lowercase();
-        if KNOWN.iter().any(|&k| k == s) {
-            return Some(s);
-        }
-    }
-    // Fallback: first non-empty segment.
-    desktop.split(':').find_map(|s| {
-        let t = s.trim();
-        (!t.is_empty()).then(|| t.to_ascii_lowercase())
-    })
-}
-
-/// Returns true for tiling WMs (i3, sway, Hyprland) where `set_position` on a
-/// hidden/unmapped window is ignored — the WM applies its own placement on map.
-#[cfg(target_os = "linux")]
-pub fn is_tiling_wm() -> bool {
-    std::env::var("I3SOCK").is_ok()
-        || std::env::var("SWAYSOCK").is_ok()
-        || std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok()
-}
-
-#[tauri::command]
-pub fn set_window_effect(window: tauri::Window, effect: String) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        use tauri::utils::config::WindowEffectsConfig;
-        use tauri::window::Effect;
-
-        let config: Option<WindowEffectsConfig> = match effect.as_str() {
-            "mica" => Some(WindowEffectsConfig {
-                effects: vec![Effect::Mica],
-                ..Default::default()
-            }),
-            "acrylic" => Some(WindowEffectsConfig {
-                effects: vec![Effect::Acrylic],
-                ..Default::default()
-            }),
-            "none" | "" => None,
-            _ => return Err(format!("Unknown effect: {effect}")),
-        };
-
-        window
-            .set_effects(config)
-            .map_err(|e| format!("Failed to set effect: {e}"))?;
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = (window, effect);
-    }
-
-    Ok(())
-}
-
-// --- Read & encode icon files ---
-
-fn read_icon_file(path: &str) -> Option<String> {
-    let data = fs::read(path).ok()?;
-    if data.is_empty() {
-        return None;
-    }
-
-    let mime = if path.ends_with(".svg") {
-        "image/svg+xml"
-    } else if path.ends_with(".png") {
-        "image/png"
-    } else if path.ends_with(".xpm") {
-        return None;
-    } else {
-        if data.starts_with(b"\x89PNG") {
-            "image/png"
-        } else if data.starts_with(b"<") || data.starts_with(b"<?xml") {
-            "image/svg+xml"
-        } else {
-            return None;
-        }
-    };
-
-    use base64::Engine;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-    Some(format!("data:{mime};base64,{b64}"))
 }
