@@ -1,5 +1,21 @@
 use serde::Serialize;
+use std::sync::atomic::Ordering;
 use std::time::UNIX_EPOCH;
+
+/// RAII guard: sets crate::PICKING_FILE for as long as it lives, so the
+/// focus-loss auto-hide skips while a native picker dialog is on screen.
+struct PickerGuard;
+impl PickerGuard {
+    fn new() -> Self {
+        crate::PICKING_FILE.store(true, Ordering::SeqCst);
+        Self
+    }
+}
+impl Drop for PickerGuard {
+    fn drop(&mut self) {
+        crate::PICKING_FILE.store(false, Ordering::SeqCst);
+    }
+}
 
 #[derive(Serialize)]
 pub struct FileMeta {
@@ -119,6 +135,7 @@ pub fn scan_music_folder(folder: String) -> Vec<String> {
 #[tauri::command]
 pub async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
+    let _guard = PickerGuard::new();
     let (tx, rx) = std::sync::mpsc::channel();
     app.dialog()
         .file()
@@ -149,6 +166,7 @@ pub fn list_fonts() -> Vec<String> {
 #[tauri::command]
 pub async fn pick_image(app: tauri::AppHandle) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
+    let _guard = PickerGuard::new();
     let (tx, rx) = std::sync::mpsc::channel();
     app.dialog()
         .file()

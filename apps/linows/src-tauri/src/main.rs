@@ -16,7 +16,7 @@ mod sysinfo;
 mod translate;
 
 use state::AppState;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, PhysicalPosition};
 
@@ -26,6 +26,10 @@ static LAST_SHOWN_AT: AtomicU64 = AtomicU64::new(0);
 /// already hidden, we check this to avoid re-showing a window that auto-hide
 /// just closed (the GNOME X11 race: Focused(false) fires before the shortcut).
 static LAST_AUTO_HIDDEN_AT: AtomicU64 = AtomicU64::new(0);
+/// True while a native file/folder picker dialog is open. The dialog steals
+/// focus, and without this guard Focused(false) auto-hide would dismiss Look
+/// while the user is still picking.
+pub static PICKING_FILE: AtomicBool = AtomicBool::new(false);
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -369,6 +373,9 @@ fn setup_x11_focus_monitor(app: &tauri::App) {
     platform::linux::window_focus::cache_self_window();
     let window = app.get_webview_window("main").expect("main window missing");
     platform::linux::window_focus::start_active_window_monitor(move || {
+        if PICKING_FILE.load(Ordering::Relaxed) {
+            return;
+        }
         if now_ms() - LAST_SHOWN_AT.load(Ordering::Relaxed) > 300 {
             LAST_AUTO_HIDDEN_AT.store(now_ms(), Ordering::Relaxed);
             let _ = window.hide();
@@ -402,7 +409,8 @@ fn setup_window_events(window: &tauri::WebviewWindow) {
             // TODO: add Wayland auto-hide when Wayland support is added.
             #[cfg(not(target_os = "linux"))]
             tauri::WindowEvent::Focused(false)
-                if now_ms() - LAST_SHOWN_AT.load(Ordering::Relaxed) > 300 =>
+                if !PICKING_FILE.load(Ordering::Relaxed)
+                    && now_ms() - LAST_SHOWN_AT.load(Ordering::Relaxed) > 300 =>
             {
                 LAST_AUTO_HIDDEN_AT.store(now_ms(), Ordering::Relaxed);
                 let _ = w.hide();

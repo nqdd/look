@@ -154,6 +154,8 @@ src-tauri/src/
 - **2026-05-16** — Dev launcher must run under `vcvarsall.bat x64` env via `scripts/windows/with-vcvars.bat`. The new `Makefile.win` invokes every cargo target through it. Old `Makefile.win` (WinUI3 dotnet build) renamed to `Makefile.winui3`. Top-level `Makefile` dispatches: Windows → `Makefile.win`, macOS → `Makefile.mac`, legacy via explicit `-f Makefile.winui3`.
 - **2026-05-16** — Tauri dev's file watcher only watches `apps/linows/src-tauri/`. Changes under `core/engine/` need a touch of any `src-tauri/` file to trigger rebuild; frontend HTML/CSS/JS changes need a manual `Ctrl+R` in the webview (no HMR — `beforeDevCommand` is empty by design since `frontendDist` is static).
 - **2026-05-16** — Dev paths fixed for Windows: `setup_dev_env()` was using POSIX env vars only (`HOME`, `XDG_DATA_HOME`) so both fell back to `.` on cmd/PowerShell, landing the dev DB and config inside the repo. Now falls back to `USERPROFILE` and uses `LOCALAPPDATA` on Windows; both write under `%LOCALAPPDATA%\look\look.dev.db` and `%USERPROFILE%\.look.dev.config`.
+- **2026-05-17** — Native file/folder pickers stole focus on Windows and triggered `Focused(false)` auto-hide, dismissing Look mid-pick. Added a `PICKING_FILE: AtomicBool` guard in `main.rs`; the `Focused(false)` path on Windows and the X11 active-window monitor on Linux both skip the hide while it's set. `files::pick_folder` / `pick_image` flip the flag via a `PickerGuard` RAII for the dialog's lifetime.
+- **2026-05-17** — Windows process kill (`/kill` command): ported the WinUI3 reference at `apps/windows/LauncherApp/Commands/KillCommand.cs` to `apps/linows/src-tauri/src/platform/windows/process.rs`. Toolhelp32 enumerates processes, `EnumWindows` tags PIDs that own visible top-level windows, system-noise / `\WindowsApps\` / `\SystemApps\` / `\ImmersiveControlPanel\` paths are filtered (bypassed when a window is present so UWP apps like Windows Terminal still appear). `:<port>` queries hit `GetExtendedTcpTable` for IPv4+IPv6 with `TCP_TABLE_OWNER_PID_LISTENER` and resolve PIDs back to apps. Kill uses `OpenProcess(PROCESS_TERMINATE)` + `TerminateProcess`. `ApplicationFrameHost.exe` is in the noise list — it hosts every UWP frame, so killing it would close all UWP windows at once. Display name comes from window-title last segment or the exe basename; the heavier WinUI3 resolution (FileDescription + Start-Menu `.lnk` → display name map) was deliberately skipped — defer until users complain. Requires `Win32_NetworkManagement_IpHelper` in the `windows` crate features.
 
 ## Status
 
@@ -167,9 +169,9 @@ src-tauri/src/
 - [x] Step 2 M2 polish — Lucide settings-icon catalog (per-page glyphs for `ms-settings:` + `look-cmd://`)
 - [x] Step 2 M2 polish — Windows-only drive picker UI in settings
 - [~] Step 2 M3 — focus-existing-app shipped (`SetForegroundWindow` + AUMID match via `platform/windows/window_focus.rs`); autostart (`HKCU\…\Run`) still pending
-- [ ] Step 2 M4 — process list/kill + clipboard file copy
+- [~] Step 2 M4 — process list/kill/list-on-port shipped (Toolhelp32 + EnumWindows + `GetExtendedTcpTable`, `TerminateProcess`); clipboard file copy (`CF_HDROP`) still pending
 - [ ] Step 2 M5 — NSIS packaging + CI
-- [ ] Step 3 — Windows UI scoping (rounded corners pending — see open issues)
+- [x] Step 3 — Windows UI scoping (rounded corners via CSS clip; see Resolved log below)
 - [x] Tooling — `Makefile.win` (Tauri) + `Makefile.winui3` (legacy WinUI3) + `scripts/windows/with-vcvars.bat`
 
 ### Progress recap (2026-05-16)
@@ -188,6 +190,8 @@ Key implementation notes:
 
 Open issues:
 - **`file_scan_drives_dismissed` config key is dead.** Inherited from WinUI3; engine doesn't read it. Either honor it or drop it from `default_config.txt`.
+- **Kill list display names are coarse for some processes.** `SystemSettings` shows as `SystemSettings` instead of "Settings"; UWP apps whose frames are stolen by `ApplicationFrameHost` show as the exe basename. WinUI3 papers over this with FileDescription + a Start-Menu `.lnk` → display-name index — port if/when users notice.
+- **High-integrity processes appear without icon/exe path.** `PROCESS_QUERY_LIMITED_INFORMATION` is denied → `QueryFullProcessImageNameW` returns nothing → frontend skips the icon fetch. Kill still works (`PROCESS_TERMINATE` is a separate right and may also be denied; surface a clearer error if so).
 
 Resolved:
 - **Focus-existing-app on Enter** — ported `apps/windows/.../ActionDispatcher.cs::TryActivateExistingAppWindow` to `apps/linows/src-tauri/src/platform/windows/window_focus.rs`. UWP entries match by AUMID (`GetApplicationUserModelId` over processes under `\WindowsApps\`); `.lnk`/`.exe` entries resolve the shortcut target then match by full exe path. `commands.rs::open_path` runs the focus probe before `window.hide()` (SetForegroundWindow needs us to still hold foreground), then falls through to `open::that` on miss.
