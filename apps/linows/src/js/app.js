@@ -10,7 +10,7 @@ import * as translatePanel from './components/translate.js';
 import * as platform from './platform.js';
 import { load } from './html-loader.js';
 import {
-  onWindowShown, onIndexReady, requestIndexRefresh, getHomeDir, copyFilesToClipboard,
+  onWindowShown, onIndexReady, requestIndexRefresh, getHomeDir, getQuickFolders, copyFilesToClipboard,
   evalCalc, runShellCommand, getSystemInfo,
   listProcesses, listProcessesOnPort, killProcess, getIcon,
   copyToClipboard, deleteClipboardEntry, isDevBuild,
@@ -212,9 +212,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Load home dir for quick folders, then initial search
-  getHomeDir().then((home) => {
+  // Load home dir + resolved quick-folder paths (Desktop, Documents, …).
+  // Quick folders use SHGetKnownFolderPath on Windows to handle OneDrive
+  // redirection; on Linux/macOS they're $HOME/<name>.
+  Promise.all([getHomeDir(), getQuickFolders()]).then(([home, folders]) => {
     if (home) search.setHomeDir(home);
+    search.setQuickFolders(folders || []);
     search.handleQueryInput('');
   });
 

@@ -43,7 +43,7 @@ pub const QUERY_SETTINGS_HINTS: [&str; 6] = [
     "sound",
 ];
 
-pub const SKIP_DIR_NAMES: [&str; 15] = [
+pub const SKIP_DIR_NAMES: [&str; 18] = [
     "node_modules",
     "target",
     "build",
@@ -59,6 +59,13 @@ pub const SKIP_DIR_NAMES: [&str; 15] = [
     "tmp",
     "cache",
     "venv",
+    // Win7-era junctions inside %USERPROFILE%\Documents that redirect to
+    // %USERPROFILE%\<name>. The ACL on these denies enumeration, so the
+    // walker hits "Access denied" on every entry — and even when it didn't,
+    // listing them would duplicate the real Pictures/Videos/Music roots.
+    "my pictures",
+    "my videos",
+    "my music",
 ];
 
 #[derive(Clone, Debug)]

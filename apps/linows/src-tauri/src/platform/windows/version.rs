@@ -50,6 +50,86 @@ pub(crate) fn read(path: &str) -> Option<String> {
     read_fixed_file_info(&target)
 }
 
+/// Read the localized `FileDescription` string from an exe's VERSION resource.
+/// Used by the `/kill` screen to upgrade `WindowsTerminal` → "Windows
+/// Terminal", `chrome` → "Google Chrome", etc.
+pub(crate) fn read_file_description(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed.starts_with("shell:") {
+        return None;
+    }
+    read_string_file_info(&trimmed.replace('/', "\\"), "FileDescription")
+        .or_else(|| read_string_file_info(&trimmed.replace('/', "\\"), "ProductName"))
+}
+
+fn read_string_file_info(path: &str, key: &str) -> Option<String> {
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    let pcwstr = PCWSTR(wide.as_ptr());
+
+    unsafe {
+        let size = GetFileVersionInfoSizeW(pcwstr, None);
+        if size == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; size as usize];
+        GetFileVersionInfoW(pcwstr, None, size, buf.as_mut_ptr() as *mut _).ok()?;
+
+        // \VarFileInfo\Translation → packed array of DWORDs, each (codepage << 16) | langid.
+        let translation_path: Vec<u16> = r"\VarFileInfo\Translation"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut ptr: *mut core::ffi::c_void = std::ptr::null_mut();
+        let mut len: u32 = 0;
+        let ok = VerQueryValueW(
+            buf.as_ptr() as *const _,
+            PCWSTR(translation_path.as_ptr()),
+            &mut ptr,
+            &mut len,
+        );
+        if !ok.as_bool() || ptr.is_null() || len < 4 {
+            return None;
+        }
+
+        // Walk every translation — some exes ship en-US first, others SDK-default first.
+        // Take the first FileDescription we can read.
+        let translations = std::slice::from_raw_parts(ptr as *const u32, (len / 4) as usize);
+        for &translation in translations {
+            let langid = translation & 0xFFFF;
+            let codepage = (translation >> 16) & 0xFFFF;
+            let subblock = format!(r"\StringFileInfo\{langid:04x}{codepage:04x}\{key}");
+            let wide_sub: Vec<u16> = subblock.encode_utf16().chain(std::iter::once(0)).collect();
+            let mut s_ptr: *mut core::ffi::c_void = std::ptr::null_mut();
+            let mut s_len: u32 = 0;
+            let s_ok = VerQueryValueW(
+                buf.as_ptr() as *const _,
+                PCWSTR(wide_sub.as_ptr()),
+                &mut s_ptr,
+                &mut s_len,
+            );
+            if !s_ok.as_bool() || s_ptr.is_null() || s_len == 0 {
+                continue;
+            }
+            // s_len is char count including null terminator.
+            let str_slice = std::slice::from_raw_parts(s_ptr as *const u16, s_len as usize);
+            let end = str_slice
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(str_slice.len());
+            if end == 0 {
+                continue;
+            }
+            let s = String::from_utf16_lossy(&str_slice[..end])
+                .trim()
+                .to_string();
+            if !s.is_empty() {
+                return Some(s);
+            }
+        }
+        None
+    }
+}
+
 fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);

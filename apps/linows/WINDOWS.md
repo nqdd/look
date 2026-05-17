@@ -22,10 +22,10 @@ Ship Look on Windows from the same Tauri v2 codebase as Linux, replacing the Win
 | Window effects (Mica/Acrylic) | done | `src-tauri/src/platform.rs:421-452` |
 | Reveal in `explorer.exe` | done | `src-tauri/src/commands.rs:184` |
 | Config dir via `LOCALAPPDATA` | done | `src-tauri/src/state.rs:334` |
-| `autostart.rs` | missing — XDG-only, needs `HKCU\…\Run` | `src-tauri/src/autostart.rs` |
+| `autostart.rs` | done — `HKCU\…\Run` via `platform/windows/autostart.rs` | `src-tauri/src/platform/windows/autostart.rs` |
 | Icon extraction | missing — XDG/.desktop only, needs Shell APIs | `src-tauri/src/platform.rs` |
 | Process list / kill | missing — `/proc`-based | `src-tauri/src/process.rs` |
-| Clipboard file copy | missing — `xclip`/`wl-clipboard` only | `src-tauri/src/commands.rs` |
+| Clipboard file copy | done — `CF_HDROP` via `platform/windows/clipboard.rs` | `src-tauri/src/platform/windows/clipboard.rs` |
 | Window focus / focus-existing-app | missing — 5 `linux_*` modules (~1.1k LOC), no Windows analogue | `src-tauri/src/linux_*.rs` |
 | Global hotkey | unknown — Tauri plugin should suffice on Windows; verify | — |
 | `tauri.conf.json` bundle targets | missing — only `deb`+`appimage` | `src-tauri/tauri.conf.json:37` |
@@ -155,6 +155,7 @@ src-tauri/src/
 - **2026-05-16** — Tauri dev's file watcher only watches `apps/linows/src-tauri/`. Changes under `core/engine/` need a touch of any `src-tauri/` file to trigger rebuild; frontend HTML/CSS/JS changes need a manual `Ctrl+R` in the webview (no HMR — `beforeDevCommand` is empty by design since `frontendDist` is static).
 - **2026-05-16** — Dev paths fixed for Windows: `setup_dev_env()` was using POSIX env vars only (`HOME`, `XDG_DATA_HOME`) so both fell back to `.` on cmd/PowerShell, landing the dev DB and config inside the repo. Now falls back to `USERPROFILE` and uses `LOCALAPPDATA` on Windows; both write under `%LOCALAPPDATA%\look\look.dev.db` and `%USERPROFILE%\.look.dev.config`.
 - **2026-05-17** — Native file/folder pickers stole focus on Windows and triggered `Focused(false)` auto-hide, dismissing Look mid-pick. Added a `PICKING_FILE: AtomicBool` guard in `main.rs`; the `Focused(false)` path on Windows and the X11 active-window monitor on Linux both skip the hide while it's set. `files::pick_folder` / `pick_image` flip the flag via a `PickerGuard` RAII for the dialog's lifetime.
+- **2026-05-17** — Windows autostart shipped at `platform/windows/autostart.rs`. Writes/removes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Look = "<exe>"` via `RegOpenKeyExW` + `RegSetValueExW`/`RegDeleteValueW`. Per-user, no admin — matches the `%LOCALAPPDATA%\Programs\Look` install convention. The exe path is quoted so spaces survive Run's command parsing. Used `RegOpenKeyExW` rather than `RegCreateKeyExW` because the Run subkey always exists on Windows and the Ex-Create variant is gated behind the `Win32_Security` feature (drags `SECURITY_ATTRIBUTES`). Requires `Win32_System_Registry`. `enable_autostart_on_first_launch()` in `main.rs` now actually takes effect on Windows.
 - **2026-05-17** — Windows process kill (`/kill` command): ported the WinUI3 reference at `apps/windows/LauncherApp/Commands/KillCommand.cs` to `apps/linows/src-tauri/src/platform/windows/process.rs`. Toolhelp32 enumerates processes, `EnumWindows` tags PIDs that own visible top-level windows, system-noise / `\WindowsApps\` / `\SystemApps\` / `\ImmersiveControlPanel\` paths are filtered (bypassed when a window is present so UWP apps like Windows Terminal still appear). `:<port>` queries hit `GetExtendedTcpTable` for IPv4+IPv6 with `TCP_TABLE_OWNER_PID_LISTENER` and resolve PIDs back to apps. Kill uses `OpenProcess(PROCESS_TERMINATE)` + `TerminateProcess`. `ApplicationFrameHost.exe` is in the noise list — it hosts every UWP frame, so killing it would close all UWP windows at once. Display name comes from window-title last segment or the exe basename; the heavier WinUI3 resolution (FileDescription + Start-Menu `.lnk` → display name map) was deliberately skipped — defer until users complain. Requires `Win32_NetworkManagement_IpHelper` in the `windows` crate features.
 
 ## Status
@@ -168,8 +169,8 @@ src-tauri/src/
 - [x] Step 2 M2 — Windows icon resolver (`IShellItemImageFactory`)
 - [x] Step 2 M2 polish — Lucide settings-icon catalog (per-page glyphs for `ms-settings:` + `look-cmd://`)
 - [x] Step 2 M2 polish — Windows-only drive picker UI in settings
-- [~] Step 2 M3 — focus-existing-app shipped (`SetForegroundWindow` + AUMID match via `platform/windows/window_focus.rs`); autostart (`HKCU\…\Run`) still pending
-- [~] Step 2 M4 — process list/kill/list-on-port shipped (Toolhelp32 + EnumWindows + `GetExtendedTcpTable`, `TerminateProcess`); clipboard file copy (`CF_HDROP`) still pending
+- [x] Step 2 M3 — focus-existing-app (`SetForegroundWindow` + AUMID match via `platform/windows/window_focus.rs`) and autostart (`HKCU\…\Run` via `platform/windows/autostart.rs`) both shipped
+- [x] Step 2 M4 — process list/kill/list-on-port (Toolhelp32 + EnumWindows + `GetExtendedTcpTable`, `TerminateProcess`) and clipboard file copy (`CF_HDROP` via `platform/windows/clipboard.rs`) all shipped
 - [ ] Step 2 M5 — NSIS packaging + CI
 - [x] Step 3 — Windows UI scoping (rounded corners via CSS clip; see Resolved log below)
 - [x] Tooling — `Makefile.win` (Tauri) + `Makefile.winui3` (legacy WinUI3) + `scripts/windows/with-vcvars.bat`

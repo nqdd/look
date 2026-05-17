@@ -102,7 +102,65 @@ pub fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_home_dir() -> Option<String> {
-    std::env::var("HOME").ok()
+    // Windows has USERPROFILE, not HOME — prefer it there so JS-side quick
+    // folders (Desktop/Documents/…) resolve. Fall back to HOME for Linux/macOS.
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("USERPROFILE")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| std::env::var("HOME").ok())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var("HOME").ok()
+    }
+}
+
+#[derive(Serialize)]
+pub struct QuickFolder {
+    pub title: String,
+    pub path: String,
+}
+
+/// Resolve the user's "quick" home folders for the search-time pin list.
+/// On Windows, uses `SHGetKnownFolderPath` because Desktop/Documents/etc.
+/// are routinely redirected (OneDrive, Group Policy) and the `~\Desktop`
+/// guess is unreliable. On Linux/macOS, falls back to `$HOME/<name>` and
+/// drops folders that don't exist.
+#[tauri::command]
+pub fn get_quick_folders() -> Vec<QuickFolder> {
+    #[cfg(target_os = "windows")]
+    {
+        crate::platform::windows::known_folders::list()
+            .into_iter()
+            .map(|(title, path)| QuickFolder { title, path })
+            .collect()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let Some(home) = std::env::var("HOME").ok().filter(|v| !v.is_empty()) else {
+            return Vec::new();
+        };
+        // macOS uses "Movies" where Windows/Linux use "Videos"; pick the one
+        // the platform's native file manager shows so typing what the user
+        // sees pins it.
+        #[cfg(target_os = "macos")]
+        let names: &[&str] = &["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music"];
+        #[cfg(not(target_os = "macos"))]
+        let names: &[&str] = &["Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music"];
+
+        names
+            .iter()
+            .filter_map(|n| {
+                let path = format!("{home}/{n}");
+                std::path::Path::new(&path).is_dir().then(|| QuickFolder {
+                    title: (*n).to_string(),
+                    path,
+                })
+            })
+            .collect()
+    }
 }
 
 const AUDIO_EXTENSIONS: &[&str] = &["mp3", "m4a", "wav", "aac", "flac", "ogg", "aiff", "alac"];

@@ -85,6 +85,10 @@ export async function getHomeDir() {
   return invoke('get_home_dir');
 }
 
+export async function getQuickFolders() {
+  return invoke('get_quick_folders');
+}
+
 export async function scanMusicFolder(folder) {
   return invoke('scan_music_folder', { folder });
 }

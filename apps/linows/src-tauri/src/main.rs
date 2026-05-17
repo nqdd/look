@@ -526,6 +526,7 @@ fn main() {
             files::is_dev_build,
             files::copy_files_to_clipboard,
             files::get_home_dir,
+            files::get_quick_folders,
             files::list_fonts,
             files::scan_music_folder,
             files::pick_folder,

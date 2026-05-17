@@ -113,7 +113,7 @@ db-shell:
 	sqlite3 "$(REAL_DB_PATH)"
 
 db-reset:
-	@powershell -NoProfile -Command "Remove-Item -Force -ErrorAction SilentlyContinue '$(REAL_DB_PATH)'"
+	@powershell -NoProfile -Command "if (Test-Path '$(REAL_DB_PATH)') { Remove-Item -Force '$(REAL_DB_PATH)' }"
 	@echo Removed: $(REAL_DB_PATH)
 
 db-refresh: db-reset app-build
@@ -131,5 +131,5 @@ dev-db-shell:
 	sqlite3 "$(DEV_DB_PATH)"
 
 dev-db-reset:
-	@powershell -NoProfile -Command "Remove-Item -Force -ErrorAction SilentlyContinue '$(DEV_DB_PATH)'"
+	@powershell -NoProfile -Command "if (Test-Path '$(DEV_DB_PATH)') { Remove-Item -Force '$(DEV_DB_PATH)' }"
 	@echo Removed: $(DEV_DB_PATH)
