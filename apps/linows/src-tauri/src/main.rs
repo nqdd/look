@@ -476,8 +476,17 @@ fn main() {
             center_and_scale_window(&window);
             apply_transparency(&window);
             #[cfg(target_os = "windows")]
-            if let Err(e) = platform::windows::effects::apply_round_corners(&window) {
-                eprintln!("[effects] round corners failed: {e}");
+            {
+                // WebView2 defaults to an opaque background. With the window
+                // marked `transparent: true` and DWM rounded corners applied,
+                // the WebView still painted opaque pixels in the corner
+                // triangles — that's the "sharp rectangle behind the rounded
+                // content" the user saw. Forcing the WebView2 default bg to
+                // (0,0,0,0) lets DWM's rounded clip be the actual silhouette.
+                let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+                if let Err(e) = platform::windows::effects::apply_round_corners(&window) {
+                    eprintln!("[effects] round corners failed: {e}");
+                }
             }
             setup_window_events(&window);
 

@@ -25,7 +25,16 @@ pub(crate) fn apply(window: tauri::Window, effect: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to set effect: {e}"))
 }
 
-/// Ask DWM for Win11 rounded corners. No-op on Win10 (the attribute is ignored).
+/// Ask DWM to round the window corners (Win11 only — Win10 silently ignores
+/// the attribute). DWM does anti-aliased corner rendering at the compositor
+/// level, which is the only path to smooth corners on Windows; GDI region
+/// clipping gives aliased staircase edges.
+///
+/// The real fix for the "sharp rectangle behind rounded content" bug is
+/// upstream of this call: the WebView2 default background must be set to
+/// fully transparent (see `main.rs` Windows block). Without that, WebView2
+/// paints opaque pixels in the corner triangles that DWM's rounded clip
+/// can't hide.
 pub(crate) fn apply_round_corners(window: &tauri::WebviewWindow) -> Result<(), String> {
     let hwnd = window
         .hwnd()

@@ -187,11 +187,11 @@ Key implementation notes:
 - Per-page settings glyphs via `apps/linows/src/js/settings-icons/windows.js`: maps `ms-settings:*` and `look-cmd://*` keys to Lucide SVGs (no real Settings icons exist; Windows hides them in the SystemSettings package's MRT resources).
 
 Open issues:
-- **Rounded corners don't render.** `DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)` is called in `platform/windows/effects.rs::apply_round_corners` but the launcher still paints square because Mica/Acrylic on a transparent borderless window fills the rectangular swap chain past the CSS `border-radius` clip. Next step: replace with `SetWindowRgn(CreateRoundRectRgn(...))` which clips the entire window region, not just the OS frame.
 - **`file_scan_drives_dismissed` config key is dead.** Inherited from WinUI3; engine doesn't read it. Either honor it or drop it from `default_config.txt`.
 
 Resolved:
 - **Focus-existing-app on Enter** — ported `apps/windows/.../ActionDispatcher.cs::TryActivateExistingAppWindow` to `apps/linows/src-tauri/src/platform/windows/window_focus.rs`. UWP entries match by AUMID (`GetApplicationUserModelId` over processes under `\WindowsApps\`); `.lnk`/`.exe` entries resolve the shortcut target then match by full exe path. `commands.rs::open_path` runs the focus probe before `window.hide()` (SetForegroundWindow needs us to still hold foreground), then falls through to `open::that` on miss.
+- **Rounded corners** — DWM rounding via `DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)` in `effects.rs`, paired with `window.set_background_color(Color(0,0,0,0))` in `main.rs` so WebView2's default background goes transparent and DWM's clip has nothing opaque to fight with. **Critical:** the frontend calls `setWindowEffect('mica')` after mount, which goes through `window.set_effects()` → `window-vibrancy::apply_mica`. That call reconfigures `DWMWA_SYSTEMBACKDROP_TYPE` and silently resets the corner preference — so we re-apply corners inside `apply()` after every `set_effects`. Initial set in `main.rs::setup` is still needed because the frontend doesn't call `set_window_effect` until the JS bundle loads. Two dead-end attempts: (a) `SetWindowRgn(CreateRoundRectRgn(…))` — GDI edges are aliased, visibly jagged; (b) `DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE` — on a borderless transparent window DWM ties the corner clip to the same frame pass, so NONE collapses the window back to square corners.
 
 ### Linux verification needed for Phase B
 
