@@ -41,6 +41,14 @@
   object-fit: contain;
 }
 
+/* Inline Lucide SVGs render at their authored 16px, which looks shrunken next
+ * to <img> icons that fill the 32px result-icon box. Scale them up to match
+ * (slightly under 100% so the stroke has breathing room). */
+.result-icon svg {
+  width: 72%;
+  height: 72%;
+}
+
 /* Text content */
 .result-text {
   flex: 1;

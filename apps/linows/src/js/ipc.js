@@ -85,6 +85,10 @@ export async function getHomeDir() {
   return invoke('get_home_dir');
 }
 
+export async function getQuickFolders() {
+  return invoke('get_quick_folders');
+}
+
 export async function scanMusicFolder(folder) {
   return invoke('scan_music_folder', { folder });
 }
@@ -115,6 +119,10 @@ export async function resetConfig() {
 
 export async function getPlatform() {
   return invoke('get_platform');
+}
+
+export async function listCandidateDrives() {
+  return invoke('list_candidate_drives');
 }
 
 export async function setWindowEffect(effect) {

@@ -69,9 +69,13 @@ fn resolve_icon(kind: &str, path: &str, id: Option<&str>) -> Option<String> {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+fn resolve_icon(kind: &str, path: &str, _id: Option<&str>) -> Option<String> {
+    windows::icons::resolve(kind, path)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn resolve_icon(_kind: &str, _path: &str, _id: Option<&str>) -> Option<String> {
-    // TODO(M2): Windows icon extraction via SHGetFileInfoW / IShellItemImageFactory.
     None
 }
 
@@ -107,6 +111,32 @@ pub fn get_platform() -> PlatformInfo {
         os,
         has_compositor,
         compositor,
+    }
+}
+
+// --- Drive enumeration (Windows-only payload; stub elsewhere) ---
+
+#[derive(Serialize)]
+pub struct CandidateDrive {
+    pub letter: String,
+    pub root: String,
+}
+
+#[tauri::command]
+pub fn list_candidate_drives() -> Vec<CandidateDrive> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::drives::enumerate_candidates()
+            .into_iter()
+            .map(|d| CandidateDrive {
+                letter: d.letter,
+                root: d.root,
+            })
+            .collect()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Vec::new()
     }
 }
 

@@ -20,6 +20,31 @@ pub fn discover_system_settings_entries(tx: mpsc::SyncSender<Candidate>) {
         candidate.subtitle = Some(subtitle(entry).into());
         let _ = tx.send(candidate);
     }
+
+    // Windows extras: classic .cpl / .msc / .exe applets that Settings doesn't
+    // cover (env vars, Device Manager, Services, Registry, Task Manager, …).
+    // Paths use the `look-cmd://` scheme so the Tauri launcher knows to spawn
+    // them via Command::new rather than ShellExecute.
+    #[cfg(target_os = "windows")]
+    emit_windows_control_panel_entries(&tx);
+}
+
+#[cfg(target_os = "windows")]
+fn emit_windows_control_panel_entries(tx: &mpsc::SyncSender<Candidate>) {
+    for entry in platform::windows_control_panel_catalog() {
+        let mut candidate = Candidate::new(
+            &format!(
+                "{SETTINGS_CANDIDATE_ID_PREFIX}{}",
+                entry.candidate_id_suffix
+            ),
+            CandidateKind::App,
+            entry.title,
+            &platform::windows_control_panel_target_path(entry),
+        );
+        candidate.subtitle =
+            Some(format!("{}{}", platform::settings_subtitle_prefix(), entry.aliases).into());
+        let _ = tx.send(candidate);
+    }
 }
 
 fn candidate_id(entry: &SettingsCatalogEntry) -> String {
@@ -128,20 +153,26 @@ mod tests {
         let discovered: Vec<Candidate> = rx.into_iter().collect();
         producer.join().expect("settings discovery thread panicked");
 
-        if platform::has_settings_app() {
-            assert_eq!(discovered.len(), platform::settings_catalog().len());
+        let expected_len = if platform::has_settings_app() {
+            let mut total = platform::settings_catalog().len();
+            #[cfg(target_os = "windows")]
+            {
+                total += platform::windows_control_panel_catalog().len();
+            }
+            total
         } else {
-            assert_eq!(discovered.len(), 0);
-        }
+            0
+        };
+        assert_eq!(discovered.len(), expected_len);
 
+        let settings_scheme = platform::settings_url_scheme_prefix();
         for candidate in discovered {
             assert_eq!(candidate.kind, CandidateKind::App);
             assert!(candidate.id.starts_with(CandidateIdKind::PREFIX_SETTING));
-            assert!(
-                candidate
-                    .path
-                    .starts_with(platform::settings_url_scheme_prefix())
-            );
+            // Windows Control Panel entries use look-cmd:// instead of ms-settings:.
+            let path_ok = candidate.path.starts_with(settings_scheme)
+                || candidate.path.starts_with("look-cmd://");
+            assert!(path_ok, "unexpected path scheme: {}", candidate.path);
             assert!(
                 candidate
                     .subtitle

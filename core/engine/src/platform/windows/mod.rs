@@ -1,5 +1,8 @@
 mod apps;
+pub(crate) mod control_panel;
+mod lnk;
 mod settings_catalog;
+mod uwp;
 
 pub(crate) const APP_SCAN_ROOTS: &[&str] = &[
     "C:/ProgramData/Microsoft/Windows/Start Menu/Programs",
@@ -26,6 +29,7 @@ pub(crate) const SETTINGS_URL_SCHEME_PREFIX: &str = "ms-settings:";
 pub(crate) const SETTINGS_SUBTITLE_PREFIX: &str = "Windows Settings ";
 
 pub(crate) use apps::discover_installed_apps;
+pub(crate) use control_panel::{CONTROL_PANEL_CATALOG, target_path as control_panel_target_path};
 pub(crate) use settings_catalog::SETTINGS_CATALOG;
 
 pub(crate) fn additional_app_scan_roots() -> Vec<String> {

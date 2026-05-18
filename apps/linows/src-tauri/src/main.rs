@@ -16,7 +16,7 @@ mod sysinfo;
 mod translate;
 
 use state::AppState;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, PhysicalPosition};
 
@@ -26,6 +26,10 @@ static LAST_SHOWN_AT: AtomicU64 = AtomicU64::new(0);
 /// already hidden, we check this to avoid re-showing a window that auto-hide
 /// just closed (the GNOME X11 race: Focused(false) fires before the shortcut).
 static LAST_AUTO_HIDDEN_AT: AtomicU64 = AtomicU64::new(0);
+/// True while a native file/folder picker dialog is open. The dialog steals
+/// focus, and without this guard Focused(false) auto-hide would dismiss Look
+/// while the user is still picking.
+pub static PICKING_FILE: AtomicBool = AtomicBool::new(false);
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -162,7 +166,15 @@ fn is_wayland() -> bool {
 /// SAFETY: Must be called at startup before any threads are spawned.
 #[cfg(debug_assertions)]
 fn setup_dev_env() {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    // Resolve home/data dirs per platform. On Linux cmd shells set HOME; on
+    // Windows cmd/PowerShell set USERPROFILE instead — falling back to "."
+    // would land dev artifacts inside the repo.
+    let home = std::env::var("HOME")
+        .ok()
+        .or_else(|| std::env::var("USERPROFILE").ok())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| ".".to_string());
+
     if std::env::var("LOOK_CONFIG_PATH")
         .unwrap_or_default()
         .trim()
@@ -180,10 +192,24 @@ fn setup_dev_env() {
         .trim()
         .is_empty()
     {
+        #[cfg(target_os = "windows")]
+        let db_dir = std::env::var("LOCALAPPDATA")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(&home)
+                    .join("AppData")
+                    .join("Local")
+            })
+            .join("look");
+
+        #[cfg(not(target_os = "windows"))]
         let db_dir = std::env::var("XDG_DATA_HOME")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| std::path::PathBuf::from(&home).join(".local").join("share"))
             .join("look");
+
         let _ = std::fs::create_dir_all(&db_dir);
         unsafe {
             std::env::set_var("LOOK_DB_PATH", db_dir.join("look.dev.db"));
@@ -347,6 +373,9 @@ fn setup_x11_focus_monitor(app: &tauri::App) {
     platform::linux::window_focus::cache_self_window();
     let window = app.get_webview_window("main").expect("main window missing");
     platform::linux::window_focus::start_active_window_monitor(move || {
+        if PICKING_FILE.load(Ordering::Relaxed) {
+            return;
+        }
         if now_ms() - LAST_SHOWN_AT.load(Ordering::Relaxed) > 300 {
             LAST_AUTO_HIDDEN_AT.store(now_ms(), Ordering::Relaxed);
             let _ = window.hide();
@@ -380,7 +409,8 @@ fn setup_window_events(window: &tauri::WebviewWindow) {
             // TODO: add Wayland auto-hide when Wayland support is added.
             #[cfg(not(target_os = "linux"))]
             tauri::WindowEvent::Focused(false)
-                if now_ms() - LAST_SHOWN_AT.load(Ordering::Relaxed) > 300 =>
+                if !PICKING_FILE.load(Ordering::Relaxed)
+                    && now_ms() - LAST_SHOWN_AT.load(Ordering::Relaxed) > 300 =>
             {
                 LAST_AUTO_HIDDEN_AT.store(now_ms(), Ordering::Relaxed);
                 let _ = w.hide();
@@ -457,6 +487,19 @@ fn main() {
             }
             center_and_scale_window(&window);
             apply_transparency(&window);
+            #[cfg(target_os = "windows")]
+            {
+                // WebView2 defaults to an opaque background. With the window
+                // marked `transparent: true`, the WebView still paints opaque
+                // pixels in the corner triangles. Forcing the default bg to
+                // (0,0,0,0) lets the CSS-clipped rounded silhouette show.
+                //
+                // No DWM corner call here — `DWMWA_WINDOW_CORNER_PREFERENCE`
+                // is a verified no-op on `transparent: true` windows
+                // (per-pixel-alpha bypasses DWM compositing). Corners come
+                // from `border-radius` on `.launcher-window` in `layout.css`.
+                let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+            }
             setup_window_events(&window);
 
             Ok(())
@@ -483,6 +526,7 @@ fn main() {
             files::is_dev_build,
             files::copy_files_to_clipboard,
             files::get_home_dir,
+            files::get_quick_folders,
             files::list_fonts,
             files::scan_music_folder,
             files::pick_folder,
@@ -492,6 +536,7 @@ fn main() {
             // Platform: icons, detection, window effects
             platform::get_icon,
             platform::get_platform,
+            platform::list_candidate_drives,
             platform::set_window_effect,
             // Commands
             calc::eval_calc,

@@ -1,4 +1,4 @@
-import { getConfig, setConfig, forceIndexRefresh, reloadConfig, resetConfig, listFonts, pickFolder, pickImage, setAutostart, getAutostart } from '../ipc.js';
+import { getConfig, setConfig, forceIndexRefresh, reloadConfig, resetConfig, listFonts, pickFolder, pickImage, setAutostart, getAutostart, listCandidateDrives } from '../ipc.js';
 import * as banner from '../components/banner.js';
 import * as platform from '../platform.js';
 
@@ -141,6 +141,9 @@ export function init(exitFn) {
         }
       }
       if (platform.hasCompositor()) applytint();
+      // Drive actual CSS --blur-radius from the chosen style (Windows uses
+      // a fixed per-style map; Linux uses the provided radius arg).
+      platform.applyBlur(0, style);
       saveConfig({ ...preset, ui_blur_style: style });
     }
   });
@@ -203,7 +206,14 @@ export function init(exitFn) {
     if (!folder) return;
     await addDirToConfig('file_scan_extra_roots', folder);
     renderDirList(extraDirsList, 'file_scan_extra_roots');
+    renderDriveChips();
   });
+
+  // Detected drives (Windows-only; the chips section is CSS-hidden elsewhere).
+  // Renders one chip per non-system fixed drive; toggling adds/removes its
+  // root (e.g. "D:\") in file_scan_extra_roots, keeping the chip and the
+  // dir-list view in sync.
+  renderDriveChips();
 
   // Skip folders (user-added only, not engine defaults)
   const skipDirsList = document.getElementById('settings-skip-dirs');
@@ -574,7 +584,10 @@ export async function restoreOnStartup() {
       document.documentElement.style.setProperty('--font-family', `"${map.ui_font_name}", system-ui, sans-serif`);
     }
 
-    // Blur
+    // Blur — drive --blur-radius from saved style so the launcher renders
+    // with the user's blur on first paint, not only after they open Settings.
+    platform.applyBlur(0, map.ui_blur_style || 'high_contrast');
+
     // Border thickness
     if (map.ui_border_thickness) {
       CSS_MAP.ui_border_thickness(map.ui_border_thickness);
@@ -695,6 +708,7 @@ async function loadConfig() {
     configCache.file_exclude_paths = map.file_exclude_paths || '';
     renderDirList(document.getElementById('settings-extra-dirs'), 'file_scan_extra_roots');
     renderDirList(document.getElementById('settings-skip-dirs'), 'file_exclude_paths');
+    renderDriveChips();
 
     // Background image
     const bgPath = map.ui_bg_image || '';
@@ -910,8 +924,13 @@ function applyBorderFromMap(map) {
 
 function applyBackgroundImage(path) {
   if (!path) return;
-  const url = `url("asset://localhost/${encodeURI(path)}")`;
-  document.documentElement.style.setProperty('--bg-image', url);
+  // Use Tauri's convertFileSrc instead of hand-rolling asset://: it
+  // normalizes path separators (`C:\Users\…` → `C:/Users/…`), URL-encodes
+  // correctly per platform, and emits the right protocol scheme
+  // (`asset://localhost/` on most platforms, `http://asset.localhost/`
+  // on Windows so WebView2 doesn't reject the custom scheme).
+  const src = window.__TAURI__.core.convertFileSrc(path);
+  document.documentElement.style.setProperty('--bg-image', `url("${src}")`);
 }
 
 function clearBackgroundImage() {
@@ -983,6 +1002,45 @@ async function removeDirFromConfig(key, folder) {
   const joined = csvJoin(updated);
   await saveConfig({ [key]: joined });
   configCache[key] = joined;
+}
+
+async function renderDriveChips() {
+  const container = document.getElementById('settings-detected-drives');
+  if (!container) return;
+  let drives = [];
+  try {
+    drives = await listCandidateDrives();
+  } catch {
+    return;
+  }
+  container.innerHTML = '';
+  const extraRoots = csvSplit(configCache.file_scan_extra_roots || '');
+  const has = (root) => extraRoots.some(r => r.toLowerCase() === root.toLowerCase());
+
+  for (const drive of drives) {
+    const chip = document.createElement('label');
+    chip.className = 'settings-drive-chip';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = has(drive.root);
+    if (cb.checked) chip.classList.add('is-active');
+    const text = document.createElement('span');
+    text.textContent = drive.root;
+    chip.appendChild(cb);
+    chip.appendChild(text);
+
+    cb.addEventListener('change', async () => {
+      if (cb.checked) {
+        await addDirToConfig('file_scan_extra_roots', drive.root);
+        chip.classList.add('is-active');
+      } else {
+        await removeDirFromConfig('file_scan_extra_roots', drive.root);
+        chip.classList.remove('is-active');
+      }
+      renderDirList(document.getElementById('settings-extra-dirs'), 'file_scan_extra_roots');
+    });
+    container.appendChild(chip);
+  }
 }
 
 function renderDirList(container, configKey) {

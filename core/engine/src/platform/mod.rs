@@ -33,6 +33,19 @@ pub(crate) fn discover_windows_installed_apps(
     windows::discover_installed_apps(config, tx)
 }
 
+#[cfg(target_os = "windows")]
+pub(crate) use windows::control_panel::ControlPanelEntry as WindowsControlPanelEntry;
+
+#[cfg(target_os = "windows")]
+pub(crate) fn windows_control_panel_catalog() -> &'static [WindowsControlPanelEntry] {
+    windows::CONTROL_PANEL_CATALOG
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn windows_control_panel_target_path(entry: &WindowsControlPanelEntry) -> String {
+    windows::control_panel_target_path(entry)
+}
+
 #[cfg(target_os = "macos")]
 pub(crate) fn discover_macos_installed_apps(
     config: &crate::config::RuntimeConfig,

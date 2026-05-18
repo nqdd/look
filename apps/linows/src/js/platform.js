@@ -34,24 +34,27 @@ export function isLinux() {
   return info?.os === 'linux';
 }
 
+// Windows blur styles map to CSS backdrop-filter radii. We deliberately do
+// NOT use native Mica/Acrylic via tauri's `set_effects` — that path
+// reconfigures DWM and brings back the sharp rectangular outline outside
+// the CSS-clipped rounded silhouette (see WINDOWS.md "Rounded corners").
+// CSS backdrop-filter is supported in WebView2 and respects our border-radius.
+const WINDOWS_BLUR_RADIUS = {
+  high_contrast: 30,
+  balanced: 20,
+  soft: 12,
+};
+
 /**
  * Apply blur effect based on platform.
- * - Windows: native Mica/Acrylic via Tauri window effects
- * - Linux + compositor: CSS backdrop-filter
+ * - Windows: CSS backdrop-filter, strength chosen by Blur Style preset
+ * - Linux + compositor: CSS backdrop-filter, strength from `radius` arg
  * - Linux bare (i3): no blur, tint-only
  */
 export function applyBlur(radius, style) {
   if (isWindows()) {
-    // Map blur style to Windows effect
-    const effectMap = {
-      high_contrast: 'mica',
-      balanced: 'acrylic',
-      soft: 'acrylic',
-    };
-    const effect = effectMap[style] || 'mica';
-    setWindowEffect(radius > 0 ? effect : 'none').catch(() => {});
-    // Clear CSS blur on Windows (native handles it)
-    document.documentElement.style.setProperty('--blur-radius', '0px');
+    const r = WINDOWS_BLUR_RADIUS[style] ?? WINDOWS_BLUR_RADIUS.balanced;
+    document.documentElement.style.setProperty('--blur-radius', r + 'px');
   } else {
     // Linux: CSS backdrop-filter (works if compositor supports it)
     const r = hasCompositor() ? Math.round(radius) : 0;

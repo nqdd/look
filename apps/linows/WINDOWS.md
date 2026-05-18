@@ -22,10 +22,10 @@ Ship Look on Windows from the same Tauri v2 codebase as Linux, replacing the Win
 | Window effects (Mica/Acrylic) | done | `src-tauri/src/platform.rs:421-452` |
 | Reveal in `explorer.exe` | done | `src-tauri/src/commands.rs:184` |
 | Config dir via `LOCALAPPDATA` | done | `src-tauri/src/state.rs:334` |
-| `autostart.rs` | missing — XDG-only, needs `HKCU\…\Run` | `src-tauri/src/autostart.rs` |
+| `autostart.rs` | done — `HKCU\…\Run` via `platform/windows/autostart.rs` | `src-tauri/src/platform/windows/autostart.rs` |
 | Icon extraction | missing — XDG/.desktop only, needs Shell APIs | `src-tauri/src/platform.rs` |
 | Process list / kill | missing — `/proc`-based | `src-tauri/src/process.rs` |
-| Clipboard file copy | missing — `xclip`/`wl-clipboard` only | `src-tauri/src/commands.rs` |
+| Clipboard file copy | done — `CF_HDROP` via `platform/windows/clipboard.rs` | `src-tauri/src/platform/windows/clipboard.rs` |
 | Window focus / focus-existing-app | missing — 5 `linux_*` modules (~1.1k LOC), no Windows analogue | `src-tauri/src/linux_*.rs` |
 | Global hotkey | unknown — Tauri plugin should suffice on Windows; verify | — |
 | `tauri.conf.json` bundle targets | missing — only `deb`+`appimage` | `src-tauri/tauri.conf.json:37` |
@@ -147,19 +147,60 @@ src-tauri/src/
 - **2026-05-16** — Windows packaging will use NSIS (per-user, no admin) to match WinUI3's existing UX.
 - **2026-05-16** — Restructure first as a no-op PR, then Windows backends incrementally.
 - **2026-05-16** — Windows Rust builds **must run under VS 2022 BT `vcvarsall.bat x64` env**, not a bare shell. Rustc autodetects VS 2026 Community's `link.exe` but that install lacks the Windows SDK, so the linker can't find `msvcrt.lib` (LNK1104). Existing `build-ffi.bat` already follows this pattern. For ad-hoc dev: wrap cargo calls in `cmd /c 'call "<vs2022bt>\VC\Auxiliary\Build\vcvarsall.bat" x64 && cargo …'`. Same applies to `cargo install tauri-cli` — without the env, build scripts fail to link.
+- **2026-05-16** — M1.5 (UWP indexing) is its own milestone, inserted before M2. Reason: without UWP, the launcher is missing most user-visible Win11 apps (Notepad, Weather, Mail, Calculator, Photos…) and the M2/M3 fixes won't be testable against them. Plan: port WinUI3's `UwpAppService.EnumerateAppsFolder` to Rust under `platform/windows/apps.rs` (or a new `platform/windows/uwp.rs`) using the `windows` crate's IShellItem/IEnumShellItems bindings; feed candidates into the indexing pipeline alongside the existing Start Menu walk in `core/engine/src/platform/windows/apps.rs`. AUMID captured during enumeration also unlocks M3 focus-existing-app.
+- **2026-05-16** — Per-page Settings icons are unobtainable from a public Windows API; WinUI3's `SettingsIconCatalog.cs` resorts to Segoe Fluent Icons glyphs for the same reason. We chose Lucide (already in tree, theme-aware via `currentColor`, cross-platform) over Segoe for the catalog. Catalog lives at `apps/linows/src/js/settings-icons/windows.js`; render path in `results.js` skips `loadIcon` when a glyph hits so the backend gear doesn't clobber it.
+- **2026-05-16** — Classic Control Panel applets (env vars dialog, Device Manager, Services, Registry, Task Manager, …) get their own `look-cmd://program[?args]` scheme rather than being shoehorned into `ms-settings:`. Reason: `ShellExecuteW` can't argv-parse rundll32 commands. The Tauri `open_path` splits on `?` and spawns via `Command::new`. Catalog at `core/engine/src/platform/windows/control_panel.rs`.
+- **2026-05-16** — Real per-page Settings PNG icons are deliberately out of scope. They live in the SystemSettings UWP package's protected MRT resource bundles; extracting them needs a fragile MRT projection or PRI parser and breaks across Windows builds. Fluent/Lucide glyph mapping is the documented WinUI3 workaround and we follow suit.
+- **2026-05-16** — Dev launcher must run under `vcvarsall.bat x64` env via `scripts/windows/with-vcvars.bat`. The new `Makefile.win` invokes every cargo target through it. Old `Makefile.win` (WinUI3 dotnet build) renamed to `Makefile.winui3`. Top-level `Makefile` dispatches: Windows → `Makefile.win`, macOS → `Makefile.mac`, legacy via explicit `-f Makefile.winui3`.
+- **2026-05-16** — Tauri dev's file watcher only watches `apps/linows/src-tauri/`. Changes under `core/engine/` need a touch of any `src-tauri/` file to trigger rebuild; frontend HTML/CSS/JS changes need a manual `Ctrl+R` in the webview (no HMR — `beforeDevCommand` is empty by design since `frontendDist` is static).
+- **2026-05-16** — Dev paths fixed for Windows: `setup_dev_env()` was using POSIX env vars only (`HOME`, `XDG_DATA_HOME`) so both fell back to `.` on cmd/PowerShell, landing the dev DB and config inside the repo. Now falls back to `USERPROFILE` and uses `LOCALAPPDATA` on Windows; both write under `%LOCALAPPDATA%\look\look.dev.db` and `%USERPROFILE%\.look.dev.config`.
+- **2026-05-17** — Native file/folder pickers stole focus on Windows and triggered `Focused(false)` auto-hide, dismissing Look mid-pick. Added a `PICKING_FILE: AtomicBool` guard in `main.rs`; the `Focused(false)` path on Windows and the X11 active-window monitor on Linux both skip the hide while it's set. `files::pick_folder` / `pick_image` flip the flag via a `PickerGuard` RAII for the dialog's lifetime.
+- **2026-05-17** — Windows autostart shipped at `platform/windows/autostart.rs`. Writes/removes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Look = "<exe>"` via `RegOpenKeyExW` + `RegSetValueExW`/`RegDeleteValueW`. Per-user, no admin — matches the `%LOCALAPPDATA%\Programs\Look` install convention. The exe path is quoted so spaces survive Run's command parsing. Used `RegOpenKeyExW` rather than `RegCreateKeyExW` because the Run subkey always exists on Windows and the Ex-Create variant is gated behind the `Win32_Security` feature (drags `SECURITY_ATTRIBUTES`). Requires `Win32_System_Registry`. `enable_autostart_on_first_launch()` in `main.rs` now actually takes effect on Windows.
+- **2026-05-17** — Windows process kill (`/kill` command): ported the WinUI3 reference at `apps/windows/LauncherApp/Commands/KillCommand.cs` to `apps/linows/src-tauri/src/platform/windows/process.rs`. Toolhelp32 enumerates processes, `EnumWindows` tags PIDs that own visible top-level windows, system-noise / `\WindowsApps\` / `\SystemApps\` / `\ImmersiveControlPanel\` paths are filtered (bypassed when a window is present so UWP apps like Windows Terminal still appear). `:<port>` queries hit `GetExtendedTcpTable` for IPv4+IPv6 with `TCP_TABLE_OWNER_PID_LISTENER` and resolve PIDs back to apps. Kill uses `OpenProcess(PROCESS_TERMINATE)` + `TerminateProcess`. `ApplicationFrameHost.exe` is in the noise list — it hosts every UWP frame, so killing it would close all UWP windows at once. Display name comes from window-title last segment or the exe basename; the heavier WinUI3 resolution (FileDescription + Start-Menu `.lnk` → display name map) was deliberately skipped — defer until users complain. Requires `Win32_NetworkManagement_IpHelper` in the `windows` crate features.
 
 ## Status
 
 - [x] Step 0 — verify Windows toolchain + `cargo check` (passes on `x86_64-pc-windows-msvc` under VS 2022 BT `vcvarsall.bat x64`)
-- [x] Step 1 — restructure to `platform/{linux,windows,shared}/`
-  - Phase A (committed): 5 `linux_*.rs` → `platform/linux/*.rs`, old `platform.rs` → `platform/mod.rs`, 17 call sites updated
-  - Phase B (pending Linux verification + commit): split `platform/mod.rs` into `linux/icons.rs` + `linux/wm.rs` + `windows/effects.rs` + `shared.rs`; split `autostart.rs`, `process.rs` into platform-dispatched shells; extract clipboard file-copy from `files.rs` to `platform/{linux,windows}/clipboard.rs`. Windows stubs return safe defaults (Vec::new / Ok(()) / Err) marked `TODO(M3)` or `TODO(M4)`. cargo check green on Windows in 1.62s.
-- [ ] Step 2 M1 — runnable Windows build (window + search + open)
-- [ ] Step 2 M2 — icons
-- [ ] Step 2 M3 — autostart + window focus
-- [ ] Step 2 M4 — process + clipboard file copy
+- [x] Step 1 — restructure to `platform/{linux,windows,shared}/` (merged to main as PR #140, commit 9925f34)
+- [x] Step 2 M1 — runnable Windows build (window + search + open)
+- [x] Step 2 M1.5 — UWP indexing via `shell:AppsFolder`
+- [x] Step 2 M1.6 — `.lnk` target dedup vs fallback `.exe` walk
+- [x] Step 2 M1.7 — classic Control Panel applets catalog (env vars, Device Manager, Services, …)
+- [x] Step 2 M2 — Windows icon resolver (`IShellItemImageFactory`)
+- [x] Step 2 M2 polish — Lucide settings-icon catalog (per-page glyphs for `ms-settings:` + `look-cmd://`)
+- [x] Step 2 M2 polish — Windows-only drive picker UI in settings
+- [x] Step 2 M3 — focus-existing-app (`SetForegroundWindow` + AUMID match via `platform/windows/window_focus.rs`) and autostart (`HKCU\…\Run` via `platform/windows/autostart.rs`) both shipped
+- [x] Step 2 M4 — process list/kill/list-on-port (Toolhelp32 + EnumWindows + `GetExtendedTcpTable`, `TerminateProcess`) and clipboard file copy (`CF_HDROP` via `platform/windows/clipboard.rs`) all shipped
 - [ ] Step 2 M5 — NSIS packaging + CI
-- [ ] Step 3 — Windows UI scoping (as needed)
+- [x] Step 3 — Windows UI scoping (rounded corners via CSS clip; see Resolved log below)
+- [x] Tooling — `Makefile.win` (Tauri) + `Makefile.winui3` (legacy WinUI3) + `scripts/windows/with-vcvars.bat`
+
+### Progress recap (2026-05-16)
+
+Working on Windows: launcher window, global hotkey, search, Esc hide, ms-settings panels resolve and open, `.lnk` and `.exe` Start Menu entries resolve and open, UWP apps appear in search (Notepad, Weather, Calculator, …), classic Control Panel applets are searchable (env vars, Device Manager, Services, Registry, Task Manager, Event Viewer, Disk Management, Programs and Features, MSConfig, MSInfo32, Resource Monitor, DxDiag, Performance Monitor), shell icons render for files/apps/UWP, settings entries get per-page Lucide glyphs.
+
+Build/run is one command: `make app-run` (Tauri path) or `make -f Makefile.winui3 …` for the legacy WinUI3 reference.
+
+Key implementation notes:
+- `commands.rs::open_path` gates the Linux-only `launch_app` chain (`gtk-launch` / `gio launch` / direct exec) on `cfg(target_os = "linux")`. Windows falls through to the generic else-branch (`open::that`) which uses `ShellExecuteW`.
+- A new `look-cmd://program[?args]` synthetic scheme handles classic Win32 applets that ShellExecute can't argv-parse (`rundll32.exe sysdm.cpl,EditEnvironmentVariables`). `open_path` splits on `?` and spawns via `Command::new`.
+- UWP enumeration lives at `core/engine/src/platform/windows/uwp.rs`, mirroring `apps/windows/LauncherApp/Services/UwpAppService.cs`: `SHCreateItemFromParsingName("shell:AppsFolder")` + `IEnumShellItems` walk → `(title, AUMID)` pairs → candidates with `shell:AppsFolder\{AUMID}` paths.
+- `.lnk` target dedup at `core/engine/src/platform/windows/lnk.rs`: each Start Menu shortcut's target is resolved via `IShellLinkW::GetPath` and stamps a `target_path:{normalized}` lock so the fallback `.exe` walker skips the same binary.
+- Icons via `apps/linows/src-tauri/src/platform/windows/icons.rs`: `IShellItemImageFactory::GetImage` → HBITMAP → `GetDIBits` BGRA → `png` encode → base64 data URL. Path separators are normalized (`/` → `\`) before handing to `SHCreateItemFromParsingName`.
+- Per-page settings glyphs via `apps/linows/src/js/settings-icons/windows.js`: maps `ms-settings:*` and `look-cmd://*` keys to Lucide SVGs (no real Settings icons exist; Windows hides them in the SystemSettings package's MRT resources).
+
+Open issues:
+- **`file_scan_drives_dismissed` config key is dead.** Inherited from WinUI3; engine doesn't read it. Either honor it or drop it from `default_config.txt`.
+- **Kill list display names are coarse for some processes.** `SystemSettings` shows as `SystemSettings` instead of "Settings"; UWP apps whose frames are stolen by `ApplicationFrameHost` show as the exe basename. WinUI3 papers over this with FileDescription + a Start-Menu `.lnk` → display-name index — port if/when users notice.
+- **High-integrity processes appear without icon/exe path.** `PROCESS_QUERY_LIMITED_INFORMATION` is denied → `QueryFullProcessImageNameW` returns nothing → frontend skips the icon fetch. Kill still works (`PROCESS_TERMINATE` is a separate right and may also be denied; surface a clearer error if so).
+
+Resolved:
+- **Focus-existing-app on Enter** — ported `apps/windows/.../ActionDispatcher.cs::TryActivateExistingAppWindow` to `apps/linows/src-tauri/src/platform/windows/window_focus.rs`. UWP entries match by AUMID (`GetApplicationUserModelId` over processes under `\WindowsApps\`); `.lnk`/`.exe` entries resolve the shortcut target then match by full exe path. `commands.rs::open_path` runs the focus probe before `window.hide()` (SetForegroundWindow needs us to still hold foreground), then falls through to `open::that` on miss.
+- **Rounded corners (CSS clip path)** — DWM physically cannot round windows created with `transparent: true` (per [MS apply-rounded-corners](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-rounded-corners): per-pixel-alpha windows are excluded). tao implements `transparent: true` via `DwmEnableBlurBehindWindow` with an empty region — exactly the disallowed case. `DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)` returns `S_OK` but is a no-op. Solution: clip the visible launcher surface with CSS, then suppress the rectangular DWM drop shadow.
+  - `apps/linows/src/css/layout.css` — `[data-os="windows"]` scoped block forces `html`/`body` `background: transparent !important` and re-asserts `border-radius: 16px` on `.launcher-window` (otherwise the dark html/body rectangle paints behind the rounded launcher and makes corners look square).
+  - `apps/linows/src-tauri/tauri.conf.json` — `"shadow": false` so the rectangular DWM drop shadow that hugs the (still-rectangular) OS window stops being visible around the rounded launcher silhouette.
+  - `apps/linows/src-tauri/src/main.rs` Windows block — kept `window.set_background_color(Color(0,0,0,0))` so WebView2's default background is transparent. (The DWM corner call in `effects.rs::apply_round_corners` is currently inert but harmless; left in case Win11 ever fixes the per-pixel-alpha exclusion.)
+  - Dead ends: `SetWindowRgn(CreateRoundRectRgn(…))` (aliased GDI edges, visibly jagged); `DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE` (ties to same frame pass — collapses corners back to square); `DwmExtendFrameIntoClientArea({-1,-1,-1,-1})` (no effect on transparent windows); stripping `WS_EX_LAYERED` (not set on this code path anyway).
 
 ### Linux verification needed for Phase B
 

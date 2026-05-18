@@ -63,12 +63,11 @@ fn walk_files(
                 return false;
             }
 
-            if entry
-                .file_type()
-                .map(|file_type| file_type.is_dir())
-                .unwrap_or(false)
-                && (name.ends_with(".app") || should_skip_dir(name, &skip_dir_names))
-            {
+            // Name-based skip applies to anything (dir, file, junction).
+            // walkdir's `file_type` doesn't follow Windows reparse points, so
+            // gating on `is_dir()` here lets `Documents\My Music` (a junction
+            // to `~\Music`) leak through and become a duplicate folder result.
+            if name.ends_with(".app") || should_skip_dir(name, &skip_dir_names) {
                 return false;
             }
 

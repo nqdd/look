@@ -1,15 +1,16 @@
 import { search as ipcSearch, getClipboardHistory } from './ipc.js';
 
 const DEBOUNCE_MS = 70;
+const MIN_QUICK_FOLDER_PREFIX = 2;
 let debounceTimer = null;
 let onResultsCallback = null;
 let homeDir = null;
 let clipboardMode = false;
 let translateMode = false;
 
-const QUICK_FOLDERS = [
-  'Desktop', 'Documents', 'Downloads', 'Pictures', 'Videos', 'Music',
-];
+/** Resolved by the backend (Windows: SHGetKnownFolderPath; *nix: $HOME/<name>).
+ *  Empty until setQuickFolders is called at boot. */
+let quickFolders = [];
 
 export function setOnResults(callback) {
   onResultsCallback = callback;
@@ -17,6 +18,10 @@ export function setOnResults(callback) {
 
 export function setHomeDir(home) {
   homeDir = home;
+}
+
+export function setQuickFolders(list) {
+  quickFolders = Array.isArray(list) ? list : [];
 }
 
 export function isClipboardMode() {
@@ -137,22 +142,20 @@ async function performClipboardSearch(filter) {
 export { formatMediumDate };
 
 function prependQuickFolders(results, query) {
-  if (!homeDir) return results;
+  if (quickFolders.length === 0) return results;
   const q = query.toLowerCase().trim();
-  if (q.length < 2) return results;
+  if (q.length < MIN_QUICK_FOLDER_PREFIX) return results;
 
   const matched = [];
-  for (const name of QUICK_FOLDERS) {
-    if (!name.toLowerCase().startsWith(q)) continue;
-    const path = `${homeDir}/${name}`;
-    // Deduplicate: skip if already in results
-    if (results.some((r) => r.path === path)) continue;
+  for (const folder of quickFolders) {
+    if (!folder.title.toLowerCase().startsWith(q)) continue;
+    if (results.some((r) => r.path === folder.path)) continue;
     matched.push({
-      id: `quickfolder:${name.toLowerCase()}`,
+      id: `quickfolder:${folder.title.toLowerCase()}`,
       kind: 'folder',
-      title: name,
+      title: folder.title,
       subtitle: 'Pinned home folder',
-      path,
+      path: folder.path,
       score: 999999,
     });
   }

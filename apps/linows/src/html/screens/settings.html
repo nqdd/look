@@ -294,6 +294,11 @@
             </label>
             <span class="settings-hint-text">Refresh index automatically when file/app changes</span>
           </div>
+          <div class="settings-row settings-windows-only">
+            <label class="settings-label">Detected Drives</label>
+            <span class="settings-hint-text">Toggle non-system drives to scan them</span>
+          </div>
+          <div class="settings-drives-list settings-windows-only" id="settings-detected-drives"></div>
           <div class="settings-row">
             <label class="settings-label">Extra Scan Dirs</label>
             <button class="settings-btn" id="settings-add-scan-dir">Add Directory</button>
@@ -356,11 +361,11 @@
           </div>
         </div>
 
-        <div class="settings-divider"></div>
+        <div class="settings-divider settings-linux-only"></div>
 
-        <!-- Arch — workarounds for WebKitGTK ghost rendering -->
-        <div class="settings-section-header"><span class="settings-section-arrow">&#9654;</span><span>Arch</span></div>
-        <div class="settings-section">
+        <!-- Arch — workarounds for WebKitGTK ghost rendering. Linux-only. -->
+        <div class="settings-section-header settings-linux-only"><span class="settings-section-arrow">&#9654;</span><span>Arch</span></div>
+        <div class="settings-section settings-linux-only">
           <div class="settings-row">
             <label class="settings-label">Disable GPU compositing</label>
             <label class="settings-toggle">

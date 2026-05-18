@@ -44,6 +44,26 @@
   letter-spacing: 0.01em;
 }
 
+/* Windows: DWM can't round per-pixel-alpha (`transparent: true`) windows —
+ * Microsoft's "Apply rounded corners" doc explicitly excludes this case
+ * (learn.microsoft.com/.../apply-rounded-corners), and DwmSetWindowAttribute
+ * returns S_OK but no-ops. Fall back to clipping the visible launcher
+ * surface via CSS border-radius + overflow: hidden.
+ *
+ * We force html/body transparent here (instead of waiting for
+ * apply_transparency() to flip data-transparent) so the dark rectangle
+ * behind the rounded launcher can never paint and make corners look square
+ * before the JS attribute flip lands. Linux still relies on the
+ * [data-transparent] path and is untouched. */
+html[data-os="windows"],
+html[data-os="windows"] body {
+  background: transparent !important;
+}
+
+html[data-os="windows"] .launcher-window {
+  border-radius: 16px;
+}
+
 /* WebKitGTK ghost-rendering workaround. Hyprland users hit this automatically
  * (their compositor + webkit combo triggers it); Arch GNOME users opt in via
  * the Advanced > Arch > "Disable blur effect" toggle which sets

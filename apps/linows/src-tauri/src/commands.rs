@@ -92,8 +92,46 @@ pub fn open_path(
     window: tauri::WebviewWindow,
     path: String,
     kind: Option<String>,
-    id: Option<String>,
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] id: Option<String>,
 ) -> Result<(), String> {
+    // Windows classic applets: look-cmd://program[?args].
+    // - `program` alone (e.g. "devmgmt.msc", "appwiz.cpl", "regedit.exe") →
+    //   open::that → ShellExecuteW, which does file-association lookup. This is
+    //   required for .msc / .cpl because CreateProcessW (what Command::new
+    //   uses) won't launch non-executable data files directly.
+    // - `program?args` (e.g. rundll32.exe with a DLL+entry) → Command::new,
+    //   because ShellExecute can't argv-parse a rundll32 command line.
+    #[cfg(target_os = "windows")]
+    if let Some(rest) = path.strip_prefix("look-cmd://") {
+        let _ = window.hide();
+        match rest.split_once('?') {
+            Some((program, args)) => {
+                let program = program.to_string();
+                let args = args.to_string();
+                std::thread::spawn(move || {
+                    if let Err(e) = std::process::Command::new(&program)
+                        .arg(&args)
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                    {
+                        eprintln!("[open_path] look-cmd spawn {program:?} failed: {e}");
+                    }
+                });
+            }
+            None => {
+                let program = rest.to_string();
+                std::thread::spawn(move || {
+                    if let Err(e) = open::that(&program) {
+                        eprintln!("[open_path] look-cmd open {program:?} failed: {e}");
+                    }
+                });
+            }
+        }
+        return Ok(());
+    }
+
     // Linux system settings: settings://panel → gnome-control-center panel
     #[cfg(target_os = "linux")]
     if let Some(panel) = path.strip_prefix("settings://") {
@@ -135,16 +173,20 @@ pub fn open_path(
         return Ok(());
     }
 
+    #[cfg(target_os = "linux")]
     if kind.as_deref() == Some("app") && !path.contains("://") {
         let result = launch_app(&path, id.as_deref());
         if result.is_ok() {
             let _ = window.hide();
         }
-        result
-    } else if kind.as_deref() == Some("browser") {
+        return result;
+    }
+
+    if kind.as_deref() == Some("browser") {
         let _ = window.hide();
         std::thread::spawn(move || {
             let _ = open::that(&path);
+            #[cfg(target_os = "linux")]
             for class in &["Brave-browser", "firefox", "chromium", "Google-chrome"] {
                 if try_focus_window(class) {
                     break;
@@ -153,6 +195,17 @@ pub fn open_path(
         });
         Ok(())
     } else {
+        // Windows: before launching a fresh instance, try to raise an existing
+        // window for the same .exe / .lnk / UWP AUMID. Must run while Look
+        // still holds foreground — SetForegroundWindow fails after hide().
+        #[cfg(target_os = "windows")]
+        if kind.as_deref() == Some("app")
+            && crate::platform::windows::window_focus::try_focus_existing(&path)
+        {
+            let _ = window.hide();
+            return Ok(());
+        }
+
         let _ = window.hide();
         std::thread::spawn(move || {
             #[cfg(target_os = "linux")]
@@ -248,6 +301,7 @@ pub fn hide_window(window: tauri::WebviewWindow) {
 
 // --- App launching helpers ---
 
+#[cfg(target_os = "linux")]
 fn launch_app(exec: &str, id: Option<&str>) -> Result<(), String> {
     let desktop_file = id
         .and_then(|id| id.strip_prefix("app:"))
@@ -338,6 +392,7 @@ fn launch_app(exec: &str, id: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn try_focus_window(wm_class: &str) -> bool {
     // i3 window manager — use i3-msg exclusively (i3 ignores raw X11
     // _NET_ACTIVE_WINDOW messages, so the x11rb fallback would report
@@ -388,6 +443,7 @@ fn try_focus_window(wm_class: &str) -> bool {
 
 /// Try to focus an existing window for a desktop file.
 /// Dispatches to the appropriate method based on display server / compositor.
+#[cfg(target_os = "linux")]
 fn try_focus_existing(desktop_path: &str) -> bool {
     let wm_class = parse_desktop_field(desktop_path, "StartupWMClass");
     let stem = std::path::Path::new(desktop_path)
@@ -549,6 +605,7 @@ fn json_has_class(json: &str, class: &str) -> bool {
     false
 }
 
+#[cfg(target_os = "linux")]
 fn parse_desktop_field(path: &str, field: &str) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     let prefix = format!("{field}=");
@@ -572,6 +629,7 @@ fn parse_desktop_field(path: &str, field: &str) -> Option<String> {
     None
 }
 
+#[cfg(target_os = "linux")]
 fn find_desktop_file(id_path: &str) -> Option<String> {
     if std::path::Path::new(id_path).exists() {
         return Some(id_path.to_string());

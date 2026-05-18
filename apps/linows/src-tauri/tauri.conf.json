@@ -21,14 +21,27 @@
         "visible": true,
         "resizable": false,
         "center": true,
-        "skipTaskbar": true
+        "skipTaskbar": true,
+        "shadow": false
       }
     ],
     "security": {
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/**", "/usr/share/**", "/nix/**", "/run/**", "/tmp/**"]
+        "scope": [
+          "$HOME/**",
+          "$APPDATA/**",
+          "$LOCALAPPDATA/**",
+          "$PICTURE/**",
+          "$DOWNLOAD/**",
+          "$DESKTOP/**",
+          "$DOCUMENT/**",
+          "/usr/share/**",
+          "/nix/**",
+          "/run/**",
+          "/tmp/**"
+        ]
       }
     }
   },

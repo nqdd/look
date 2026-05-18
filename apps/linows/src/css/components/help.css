@@ -1,4 +1,7 @@
-/* Help screen overlay */
+/* Help screen overlay — uses an opaque dark base under the translucent
+ * tint so the launcher's results/preview can't bleed through. The tint
+ * still overlays the base, preserving the user's chosen theme color hue
+ * while the base provides full opacity. */
 .help-overlay {
   position: absolute;
   inset: 0;
@@ -6,7 +9,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-tint);
+  background-color: rgba(20, 22, 30, 0.97);
+  background-image: linear-gradient(var(--bg-tint), var(--bg-tint));
 }
 
 .help-overlay[hidden] {

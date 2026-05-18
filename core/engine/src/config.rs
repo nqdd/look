@@ -43,7 +43,7 @@ pub const QUERY_SETTINGS_HINTS: [&str; 6] = [
     "sound",
 ];
 
-pub const SKIP_DIR_NAMES: [&str; 15] = [
+pub const SKIP_DIR_NAMES: [&str; 18] = [
     "node_modules",
     "target",
     "build",
@@ -59,6 +59,13 @@ pub const SKIP_DIR_NAMES: [&str; 15] = [
     "tmp",
     "cache",
     "venv",
+    // Win7-era junctions inside %USERPROFILE%\Documents that redirect to
+    // %USERPROFILE%\<name>. The ACL on these denies enumeration, so the
+    // walker hits "Access denied" on every entry — and even when it didn't,
+    // listing them would duplicate the real Pictures/Videos/Music roots.
+    "my pictures",
+    "my videos",
+    "my music",
 ];
 
 #[derive(Clone, Debug)]
@@ -300,6 +307,17 @@ fn append_missing_default_config_entries(path: &Path) {
 fn default_config_contents() -> String {
     let app_roots = default_app_scan_roots().join(",");
     let file_roots = platform::file_scan_root_suffixes().join(",");
+    // Windows reads as too transparent at the macOS/Linux baseline of 0.55
+    // because we cannot use native Mica (the vibrancy DWM call breaks the
+    // CSS-clipped rounded corners) and the CSS blur alone doesn't fully
+    // anchor the launcher against busy desktops. Bump the first-launch
+    // default; existing configs are untouched (defaults only seed the
+    // initial file).
+    let tint_opacity = if cfg!(target_os = "windows") {
+        "0.85"
+    } else {
+        "0.55"
+    };
     format!(
         "# look configuration\n\
 # Generated on first launch. Edit values and press Cmd+Shift+; to reload.\n\
@@ -321,7 +339,7 @@ skip_dir_names=node_modules,target,build,dist,library,applications,old firefox d
 ui_tint_red=0.08\n\
 ui_tint_green=0.10\n\
 ui_tint_blue=0.12\n\
-ui_tint_opacity=0.55\n\
+ui_tint_opacity={tint_opacity}\n\
 ui_blur_material=hudWindow\n\
 ui_blur_opacity=0.95\n\
 ui_font_name=SF Pro Text\n\

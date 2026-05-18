@@ -45,7 +45,9 @@ Mapping from Rust core to Tauri commands, and frontend IPC calls.
 |---------|-----------|-------------|
 | `open_path` | `(path: String) -> Result<(), String>` | Open file/app/folder with default handler |
 | `reveal_path` | `(path: String) -> Result<(), String>` | Show in file manager (Explorer/Nautilus) |
-| `get_icon` | `(path: String) -> String` | Extract icon, return as base64 data URI |
+| `get_icon` | `(kind: String, path: String, id: Option<String>) -> IconResult` | Extract icon as `data:image/png;base64,…` (cached) |
+| `pick_folder` | `(app: AppHandle) -> Option<String>` | Native folder picker (Music folder, etc.) |
+| `pick_image` | `(app: AppHandle) -> Option<String>` | Native image picker (background image) |
 
 ---
 
@@ -84,11 +86,11 @@ Mapping from Rust core to Tauri commands, and frontend IPC calls.
 |---------|-----------|-------------|
 | `eval_calc` | `(expr: String) -> CalcResult` | Evaluate math expression |
 | `exec_shell` | `(cmd: String) -> ShellResult` | Run shell command, capture output |
-| `list_processes` | `(query: String) -> Vec<ProcessInfo>` | Fuzzy-match running processes |
-| `kill_process` | `(pid: u32) -> bool` | Terminate process by PID |
+| `list_processes` | `() -> Vec<RunningApp>` | Enumerate running user-facing apps (`/kill` screen) |
+| `list_processes_on_port` | `(port: u16) -> Vec<RunningApp>` | Apps with a LISTEN socket on `port` (`/kill :3000`) |
+| `kill_process` | `(pid: u32) -> Result<String, String>` | Terminate process by PID |
 | `get_system_info` | `() -> SystemInfo` | CPU, memory, disk, GPU, network |
 | `scan_music_folder` | `(folder: String) -> Vec<String>` | List audio files in folder |
-| `pick_folder` | `(app: AppHandle) -> Option<String>` | Native folder picker dialog |
 | `music_play` | `(path: String) -> Result<(), String>` | Play audio file via rodio |
 | `music_pause` | `() -> ()` | Pause playback |
 | `music_resume` | `() -> ()` | Resume playback |

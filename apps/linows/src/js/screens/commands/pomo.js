@@ -654,9 +654,14 @@ function shuffle(arr) {
 }
 
 function trackName(path) {
-  const name = path.split('/').pop() || path;
+  const name = path.split(/[/\\]/).pop() || path;
   const dot = name.lastIndexOf('.');
-  return dot > 0 ? name.substring(0, dot) : name;
+  const base = dot > 0 ? name.substring(0, dot) : name;
+  const MAX = 48;
+  if (base.length <= MAX) return base;
+  const head = Math.ceil((MAX - 1) / 2);
+  const tail = Math.floor((MAX - 1) / 2);
+  return base.substring(0, head) + '…' + base.substring(base.length - tail);
 }
 
 async function musicChooseFolder() {

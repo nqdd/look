@@ -18,6 +18,12 @@ pub(crate) fn discover_installed_apps(config: &RuntimeConfig, tx: mpsc::SyncSend
 
     let home = windows::user_home_dir();
     let mut seen_ids = HashSet::new();
+
+    // UWP / MSIX apps first: Win11 ships Notepad, Weather, Calculator, etc. as
+    // packaged apps with no .lnk in Start Menu. Emitting before the Start Menu
+    // walk lets them claim title locks for names that overlap (e.g. Notepad).
+    emit_uwp_candidates(&tx, &config.app_exclude_names, &mut seen_ids);
+
     for root in roots {
         let expanded_root = expand_with_home(&root, home.as_deref());
         walk_windows_app_entries(
@@ -40,6 +46,36 @@ pub(crate) fn discover_installed_apps(config: &RuntimeConfig, tx: mpsc::SyncSend
             &config.app_exclude_names,
             &mut seen_ids,
         );
+    }
+}
+
+fn emit_uwp_candidates(
+    tx: &mpsc::SyncSender<Candidate>,
+    app_exclude_names: &[String],
+    seen_ids: &mut HashSet<String>,
+) {
+    for app in crate::platform::windows::uwp::enumerate_apps_folder() {
+        if should_exclude_app_name(&app.title, app_exclude_names) {
+            continue;
+        }
+        let normalized_identity = normalize_app_name(&app.title);
+        let title_lock = format!("title:{normalized_identity}");
+        if !seen_ids.insert(title_lock) {
+            continue;
+        }
+        let aumid_lock = format!("aumid:{}", app.aumid.to_lowercase());
+        if !seen_ids.insert(aumid_lock) {
+            continue;
+        }
+
+        let path = format!("shell:AppsFolder\\{}", app.aumid);
+        let key = format!("{APP_CANDIDATE_ID_PREFIX}uwp:{}", app.aumid);
+        let mut candidate = Candidate::new(&key, CandidateKind::App, &app.title, &path);
+        // Default subtitle would be the raw AUMID — useless in the result list.
+        // Mirror linux/apps.rs and use the kind label instead; right-hand detail
+        // panel still shows the full path.
+        candidate.subtitle = Some("App".into());
+        let _ = tx.send(candidate);
     }
 }
 
@@ -86,6 +122,20 @@ fn walk_windows_app_entries(
 
         if !is_windows_start_menu_entry(path_str) {
             continue;
+        }
+
+        // Resolve .lnk targets so the fallback exe walk can skip duplicates
+        // (e.g. "Visual Studio Code.lnk" → Code.exe; "Git Bash.lnk" →
+        // git-bash.exe). Claim a `target_path:{normalized}` lock in seen_ids
+        // before emitting so the dedup check is in place by the time the
+        // fallback walker runs.
+        if path_str.to_ascii_lowercase().ends_with(".lnk")
+            && let Some(target) = crate::platform::windows::lnk::resolve_target(path_str)
+        {
+            let normalized = crate::platform::windows::lnk::normalize_for_compare(&target);
+            if !normalized.is_empty() {
+                seen_ids.insert(format!("target_path:{normalized}"));
+            }
         }
 
         emit_windows_app_candidate(path_str, tx, app_exclude_names, seen_ids, true);
@@ -145,6 +195,13 @@ fn walk_windows_fallback_roots(
 
         // IF IT IS A FILE: Check if it's an executable we want
         if file_type.is_file() && is_windows_fallback_executable(path_str) {
+            // Skip if a Start Menu .lnk already resolved to this same exe —
+            // walk_windows_app_entries planted a `target_path:{normalized}`
+            // lock for every resolvable shortcut target.
+            let normalized = crate::platform::windows::lnk::normalize_for_compare(path_str);
+            if !normalized.is_empty() && seen_ids.contains(&format!("target_path:{normalized}")) {
+                continue;
+            }
             emit_windows_app_candidate(path_str, tx, app_exclude_names, seen_ids, false);
         }
     }
@@ -201,7 +258,11 @@ fn emit_windows_app_candidate(
     // Globally unique candidate id
     let key = format!("{APP_CANDIDATE_ID_PREFIX}{normalized_identity}_{path_id}");
 
-    let _ = tx.send(Candidate::new(&key, CandidateKind::App, &title, path));
+    let mut candidate = Candidate::new(&key, CandidateKind::App, &title, path);
+    // Default subtitle would be the Start Menu .lnk path — long and redundant
+    // (right-hand detail panel already shows it). Mirror linux/apps.rs.
+    candidate.subtitle = Some("App".into());
+    let _ = tx.send(candidate);
 }
 
 fn is_windows_noise_executable(path: &str) -> bool {
@@ -480,20 +541,15 @@ mod tests {
 
     #[test]
     fn fallback_title_dedupe_applies_to_windowsapps_and_system32() {
-        assert_eq!(
-            should_apply_windows_fallback_title_dedupe("C:/Windows/System32/notepad.exe"),
-            true
-        );
-        assert_eq!(
-            should_apply_windows_fallback_title_dedupe(
-                "C:/Program Files/WindowsApps/Microsoft.WindowsNotepad_11.0.0.0_x64__8wekyb3d8bbwe/notepad.exe"
-            ),
-            true
-        );
-        assert_eq!(
-            should_apply_windows_fallback_title_dedupe("C:/Program Files/Notepad++/notepad++.exe"),
-            false
-        );
+        assert!(should_apply_windows_fallback_title_dedupe(
+            "C:/Windows/System32/notepad.exe"
+        ));
+        assert!(should_apply_windows_fallback_title_dedupe(
+            "C:/Program Files/WindowsApps/Microsoft.WindowsNotepad_11.0.0.0_x64__8wekyb3d8bbwe/notepad.exe"
+        ));
+        assert!(!should_apply_windows_fallback_title_dedupe(
+            "C:/Program Files/Notepad++/notepad++.exe"
+        ));
     }
 
     #[test]

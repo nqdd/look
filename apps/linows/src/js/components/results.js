@@ -1,5 +1,6 @@
 import { getIcon } from '../ipc.js';
 import { clipboard as clipboardIcon, check as checkIcon, appIcon, fileIcon, folderIcon, settingIcon } from '../icons.js';
+import { getSettingsIcon as getWindowsSettingsIcon } from '../settings-icons/windows.js';
 
 const iconCache = new Map();
 const pickedMap = new Map(); // key → result
@@ -149,6 +150,26 @@ function updatePickedIndicators() {
 
 // --- Row creation ---
 
+// Settings entries pack their full alias list into `subtitle` so the engine
+// can fuzzy-match on keywords ("wifi", "ssid", "captions" …). That's great
+// for search but renders as a long noisy line ("Windows Settings settings
+// wifi wireless network ssid"). Trim the alias tail at render time — engine
+// keeps the full string for scoring.
+const SETTINGS_SUBTITLE_PREFIXES = ['Windows Settings', 'System Settings'];
+
+function displaySubtitle(result) {
+  if (result.kind === 'clipboard') return result.subtitle;
+  if (result.subtitle) {
+    for (const prefix of SETTINGS_SUBTITLE_PREFIXES) {
+      if (result.subtitle.startsWith(prefix + ' ')) return prefix;
+    }
+    return result.subtitle;
+  }
+  if (result.kind === 'file' || result.kind === 'folder') return result.path;
+  const kindLabels = { app: 'App', setting: 'Setting' };
+  return kindLabels[result.kind] || result.kind;
+}
+
 function createRow(result, index) {
   const row = document.createElement('div');
   row.className = 'result-row';
@@ -157,14 +178,21 @@ function createRow(result, index) {
   // Icon (kind-based SVG fallback, async-load real icon)
   const icon = document.createElement('div');
   icon.className = 'result-icon';
-  const isSettings = result.path?.startsWith('settings://') || result.subtitle?.toLowerCase().startsWith('settings');
+  const isLinuxSettings = result.path?.startsWith('settings://') || result.subtitle?.toLowerCase().startsWith('settings');
+  // Windows ms-settings: panels share one icon at the OS level (the gear) — we
+  // map each panel to a category-specific Lucide glyph via the catalog so the
+  // list scans visually. Returns null if the path isn't an ms-settings URI.
+  const windowsSettingsSvg = getWindowsSettingsIcon(result.path);
   const fallbacks = { file: fileIcon, folder: folderIcon, setting: settingIcon, clipboard: clipboardIcon };
-  icon.innerHTML = isSettings ? settingIcon : (fallbacks[result.kind] || appIcon);
+  icon.innerHTML = windowsSettingsSvg
+    || (isLinuxSettings ? settingIcon : (fallbacks[result.kind] || appIcon));
   icon.style.background = 'var(--control-fill)';
   icon.style.color = 'var(--font-secondary)';
   row.appendChild(icon);
 
-  if (result.kind !== 'clipboard') {
+  // Skip backend icon fetch for ms-settings entries — the Shell PNG would just
+  // be the generic gear and would clobber our category-specific glyph.
+  if (result.kind !== 'clipboard' && !windowsSettingsSvg) {
     loadIcon(icon, result.kind, result.path, result.id);
   }
 
@@ -179,16 +207,7 @@ function createRow(result, index) {
 
   const subtitle = document.createElement('div');
   subtitle.className = 'result-path';
-  if (result.kind === 'clipboard') {
-    subtitle.textContent = result.subtitle;
-  } else if (result.subtitle) {
-    subtitle.textContent = result.subtitle;
-  } else if (result.kind === 'file' || result.kind === 'folder') {
-    subtitle.textContent = result.path;
-  } else {
-    const kindLabels = { app: 'App', setting: 'Setting' };
-    subtitle.textContent = kindLabels[result.kind] || result.kind;
-  }
+  subtitle.textContent = displaySubtitle(result);
   text.appendChild(subtitle);
 
   row.appendChild(text);

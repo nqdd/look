@@ -3,6 +3,45 @@
   overflow: hidden;
 }
 
+/* Sections gated by host OS. Each element keeps its natural display on the
+ * matching OS; we only forcibly hide on the wrong one. The :not() selector
+ * raises specificity to 0,2,1 so this beats class-only rules like
+ * .settings-section { display: flex } that would otherwise win on cascade
+ * order. data-os is set at boot by js/platform.js from get_platform. */
+html:not([data-os="windows"]) .settings-windows-only,
+html:not([data-os="linux"]) .settings-linux-only {
+  display: none;
+}
+/* Drive chip list shares the 140px left-pad with .settings-dir-list so its
+ * items align under the same column as Extra Scan Dirs / Skip Folders. */
+.settings-drives-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0 8px 140px;
+}
+
+.settings-drive-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  font-size: calc(var(--font-size) - 1px);
+  user-select: none;
+}
+.settings-drive-chip input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+.settings-drive-chip.is-active {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--accent-color, var(--border-color));
+}
+
 .settings-panel {
   flex: 1;
   display: flex;
