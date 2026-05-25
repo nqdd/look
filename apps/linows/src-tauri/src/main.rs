@@ -8,6 +8,7 @@ mod commands;
 mod config;
 mod consts;
 mod files;
+mod highlight;
 mod music;
 mod platform;
 mod process;
@@ -549,12 +550,21 @@ fn main() {
             // commits the HTML — visible as a brief "big rectangle without
             // corners" flash before the rounded launcher appears.
             // On X11 bare (no compositor), keep GTK's solid bg as a fallback.
+            //
+            // Hide the window first so the opaque frame never appears — the
+            // race between GTK's first paint and set_background_color causes
+            // intermittent sharp-cornered flashes on GNOME.
             #[cfg(target_os = "linux")]
             if supports_transparency() {
+                let _ = window.hide();
                 let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
             }
             center_and_scale_window(&window);
             apply_transparency(&window);
+            #[cfg(target_os = "linux")]
+            if supports_transparency() {
+                let _ = window.show();
+            }
             #[cfg(target_os = "windows")]
             {
                 // WebView2 defaults to an opaque background. With the window
@@ -591,6 +601,7 @@ fn main() {
             // Files: meta, version, clipboard, music, folder
             files::get_file_meta,
             files::get_app_version,
+            files::list_folder,
             files::is_dev_build,
             files::copy_files_to_clipboard,
             files::get_home_dir,
@@ -627,6 +638,8 @@ fn main() {
             // Autostart
             autostart::set_autostart,
             autostart::get_autostart,
+            // Highlight
+            highlight::highlight_file_cmd,
         ])
         .build(tauri::generate_context!())
         .expect("error while building look desktop")
