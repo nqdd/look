@@ -13,6 +13,7 @@
 > | `Cmd+/`         | `Ctrl+/`         |
 > | `Cmd+0`         | `Ctrl+0`         |
 > | `Cmd+1`…`Cmd+5` | `Ctrl+1`…`Ctrl+5`|
+> | `Cmd+1`…`Cmd+9` (running-apps switcher, macOS only) | — |
 > | `Cmd+P`         | `Ctrl+P`         |
 > | `Cmd+Shift+P`   | `Ctrl+Shift+P`   |
 > | `Cmd+Shift+,`   | `Ctrl+Shift+,`   |
@@ -160,6 +161,23 @@ Built-in theme presets are available:
 
 Theme is saved as `ui_theme=<name>` in config.
 
+**Running Apps** (macOS only): controls the floating strip of running-app icons rendered outside the bordered launcher panel. Each icon has a corner number badge; pressing `Cmd`+the badge digit on the home screen activates that app. Placement options:
+
+| Value    | Layout                                                |
+| -------- | ----------------------------------------------------- |
+| `None`   | Strip hidden; `Cmd+1`..`Cmd+9` switching disabled     |
+| `Top`    | Horizontal row above the launcher                     |
+| `Right`  | Vertical column to the right (default)                |
+| `Bottom` | Horizontal row below the launcher                     |
+
+Strip behavior:
+
+- **Stable** — icons sit in alphabetical order and don't shuffle when you switch apps. The `Cmd`+digit for a given app stays the same until you launch or quit something.
+- **Ergonomic badge keys** — easier-to-reach keys are assigned first. With 5 running apps the badges are `1, 2, 3, 8, 9` (skipping the harder middle keys); `5/6/7` only get used when you have 7+ apps running.
+- **Windowless apps** (Finder with no Finder windows, etc.) get a fresh window via a Dock-style "reopen" so you don't see an empty flash.
+
+Saved as `running_apps_placement=<value>` in `~/.look.config`. New keys are auto-appended to existing config files on next Save Config.
+
 ### Indexing Settings
 
 Default values:
@@ -240,7 +258,8 @@ Note: `Settings Blur` is stored as local app UI state (UserDefaults) and is not 
 - `Up` / `Down`: move selection (and in `kill`, move process selection)
 - `Cmd+/`: command mode
 - `:cmd` (e.g. `:calc 2+2`, `:kill chrome`, `:sys`, `:pomo`): jump to a command directly from the home screen
-- `Cmd+1` / `Cmd+2` / `Cmd+3` / `Cmd+4` / `Cmd+5`: direct command switch (`shell`, `calc`, `kill`, `sys`, `pomo`)
+- `Cmd+1` / `Cmd+2` / `Cmd+3` / `Cmd+4` / `Cmd+5`: in command mode, direct command switch (`shell`, `calc`, `kill`, `sys`, `pomo`)
+- `Cmd+1`..`Cmd+9`: on the home screen, activate the running-app whose badge shows that digit (macOS, when `Running Apps` is not set to `None`). Badge labels are ergonomic, not strictly positional — see Settings → Appearance → Running Apps
 - `Space` / `R` / `P` (inside `/pomo`): start/pause session, reset, toggle music play/pause
 - `Escape`: back/close (context dependent)
 - `Shift+Escape`: hide launcher

@@ -291,6 +291,13 @@ Forward work for the Tauri app at `apps/linows/`. Build/dev guide: `apps/linows/
 ### Commands & features
 - [ ] Banner notifications (animated toast messages)
 - [ ] `/kill` by port on Linux (`:3000` syntax) — Windows already has this via `GetExtendedTcpTable`
+- [ ] **Running apps switcher parity (Linux + Windows)** — port the macOS feature at `apps/macos/LauncherApp/look-app/{Models/RunningAppsService.swift,Views/Launcher/RunningAppsStripView.swift}` to the Tauri shell.
+  - Backend: enumerate running apps with a visible top-level window (Linux: X11 `_NET_CLIENT_LIST` / Wayland: `wlr-foreign-toplevel-management` where available, fall back to per-DE; Windows: `EnumWindows` filtered by `WS_VISIBLE` + non-tool-window + non-empty title, dedupe by `GetWindowThreadProcessId` → `QueryFullProcessImageNameW`), expose as a Tauri command returning `{ pid, name, iconBase64?, isActive }[]` capped at 9 most-recently-active.
+  - Frontend: render the icon strip (matches macOS visual: 34pt icons, corner number badge `1`-`9`, accent ring on active app, hover scale/opacity). Reuse the placement enum (`none` / `top` / `right` / `bottom`).
+  - Keyboard: when home screen has focus and `running_apps_placement` ≠ `none`, intercept `Ctrl+1`..`Ctrl+9` and forward to a `focus_app(index)` Tauri command (Linux: `wmctrl` / xdotool / wlr-foreign-toplevel `activate`; Windows: `SetForegroundWindow` with `AttachThreadInput` workaround).
+  - Config: parse + persist `running_apps_placement` in the Tauri config writer the same way as macOS (`upsertConfigLine` equivalent), default `right`.
+  - Settings UI: add the `Running Apps` dropdown next to the Theme dropdown in the Appearance tab (single row layout, ~40pt gap between groups, matching macOS).
+  - Activate-on-click should also dismiss the launcher window (parity with macOS `hideLauncherWindow(restorePreviousApp: false)`).
 - [ ] Configurable global hotkey (let users change the toggle shortcut via settings; today `Alt+Space` is hardcoded; non-trivial because Wayland sway/Hyprland/GNOME each have separate keybinding-injection paths)
 - [ ] Structured logging — wire the Backend Log Level setting (error/warn/info/debug) to control output; replace `eprintln!` with `log` macros
 - [ ] Unit/integration tests for backend modules (calc, config, autostart, process, sysinfo, clipboard, shell)
@@ -302,6 +309,12 @@ Forward work for the Tauri app at `apps/linows/`. Build/dev guide: `apps/linows/
 
 ### macOS
 - [ ] Dynamic window scaling based on monitor resolution (match linows — 1.0x at 1080p, 1.2x at 1440p, 1.3x max)
+- [ ] **Launcher drag is still limited to padding-only zones.** Today `WindowDragArea` is a single `NSView` with `mouseDownCanMoveWindow = true` placed behind the running-apps strip and (implicitly via `isMovableByWindowBackground`) behind the bordered panel. Anywhere SwiftUI installs a gesture (search field, result rows, hint bar, panel-wide `.onTapGesture { focusActiveInput() }`, strip icon `.onTapGesture` / `.onHover`) consumes mouseDown before AppKit's drag-by-background can fire, so the user can only grab the narrow padding around content. Attempts to fix:
+  - Adding `WindowDragArea` to the bordered-panel background under SwiftUI: blocked by SwiftUI hit-testing claiming events even though gestures cancel on movement.
+  - Disabling hit testing on `themedBackground`: lets events fall through visual layers but didn't propagate far enough.
+  - Installing a window-content-view `NSPanGestureRecognizer` and calling `window.setFrameOrigin` on `.changed`: the recognizer DID fire, but `NSWindow.constrainFrameRect(_:to:)` clamped the y origin to the current screen's menu-bar boundary (verified — `target.y=1683` clamped to `after.y=1664`). Subclassing `NSWindow` with a no-op `constrainFrameRect` then caused a runaway feedback loop because `sender.translation(in: nil)` is relative to the gesture's start point — moving the window changes the cursor's relative position and the next event reports an even larger translation.
+  - Both reverted on 2026-05-29. Window resize on placement / screen change still works, and the simple `mouseDownCanMoveWindow` background on the strip + panel padding is left in place.
+  - Suggested next attempts: (a) use `sender.setTranslation(.zero, in: nil)` after each `.changed` so translation is incremental, combined with the no-op `constrainFrameRect` subclass; (b) call `window.performDrag(with: NSApp.currentEvent!)` on pan `.began` and let AppKit drive the drag from there (resolves the feedback-loop but needs to verify it works across vertical multi-monitor setups); (c) add an explicit visible drag handle bar (e.g. 12pt above the strip when placement is `.top`, or a thin region on the right of the panel) that's clearly draggable and doesn't conflict with the rest of the UI.
 
 ## Evergreen: Search quality and performance (always-on)
 

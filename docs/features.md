@@ -38,6 +38,16 @@ This document tracks what `look` supports today and what is planned next.
 - kill flow with explicit confirmation and process-by-port lookup (`:3000` / `port 3000`)
 - warning cue when shell input contains `sudo`
 
+### Running apps switcher (macOS)
+
+- floating icon strip outside the launcher's bordered panel showing currently running apps (`NSWorkspace.shared.runningApplications`, filtered to regular apps, capped at 9, sorted alphabetically and **stable** — positions don't shuffle when you switch apps)
+- on the home screen, `Cmd`+the digit shown on an icon's corner badge activates it (in command mode, `Cmd+1`..`Cmd+5` keep their existing command-catalog semantics)
+- badge labels follow an ergonomic outer-first layout: with N running apps we consume the easiest-to-reach keys first (`1, 2, 3, 9, 8` before `4`, then `7`, then `6`, then `5`). 5 running apps → badges `1, 2, 3, 8, 9`; 9 running apps → all of `1`..`9`
+- windowless apps (e.g. Finder with no Finder windows open) get a fresh window via a Dock-style reopen instead of the bare activate flash; hidden apps (`Cmd+H`) are unhidden first
+- click on an icon also switches; hover shows app name + shortcut tooltip; active app has an accent ring
+- placement is configurable via `Settings > Appearance > Running Apps`: `None` | `Top` | `Right` (default) | `Bottom`. Persisted as `running_apps_placement` in `~/.look.config`
+- `None` hides the strip and disables the `Cmd+number` switching
+
 ### Settings and runtime config
 
 - in-app settings panel (`Cmd+Shift+,`)
@@ -61,6 +71,7 @@ This document tracks what `look` supports today and what is planned next.
 
 ## In progress / near-term
 
+- running apps switcher parity on Linux + Windows (Tauri shell) — see `docs/tasks.md` "linows" section
 - better coverage for deeper System Settings pages
 - safer shell policy controls (more explicit execution guardrails)
 - richer benchmark reporting (p50/p95/p99) for query/index paths
