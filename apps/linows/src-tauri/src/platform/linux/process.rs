@@ -52,8 +52,23 @@ pub(crate) fn list() -> Vec<RunningApp> {
         }
     }
 
-    // 3. Scan .desktop files, match Exec against running process names
-    let desktop_entries = scan_desktop_files();
+    // 3. Scan .desktop files, match Exec against running process names.
+    //    Sort so "primary" entries (desktop stem matches a bin in its own Exec,
+    //    e.g. `steam.desktop` with `Exec=steam`) are tried first. Otherwise
+    //    user-installed game shortcuts like `Dota 2.desktop` (Exec=steam …)
+    //    would claim the steam /proc match before steam.desktop gets a turn,
+    //    and Steam would show up as "Dota 2" in the running-apps list.
+    let mut desktop_entries = scan_desktop_files();
+    desktop_entries.sort_by_key(|de| {
+        let stem = Path::new(&de.path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let bins = extract_bin_names(&de.exec);
+        let primary = bins.iter().any(|b| b.to_lowercase() == stem);
+        (if primary { 0 } else { 1 }, stem)
+    });
     let mut apps: Vec<RunningApp> = Vec::new();
     let mut matched_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -87,12 +102,20 @@ pub(crate) fn list() -> Vec<RunningApp> {
                 continue;
             }
             // /proc/<pid>/comm is limited to TASK_COMM_LEN-1 == 15 chars, so
-            // `gnome-text-editor` shows up as `gnome-text-edit`. Match the
-            // truncated form too when the desktop Exec is longer.
+            // `gnome-text-editor` shows up as `gnome-text-edit`. On NixOS the
+            // wrapper prefixes a `.` (`.gnome-text-edi-wrapped`), eating one
+            // more slot so the stripped form is only 14 chars (`gnome-text-edi`).
+            // Try both lengths.
             let pids = norm_procs.get(&key).or_else(|| {
-                let trunc: String = key.chars().take(15).collect();
-                if trunc.len() < key.len() {
-                    norm_procs.get(&trunc)
+                let trunc15: String = key.chars().take(15).collect();
+                if trunc15.len() < key.len()
+                    && let Some(v) = norm_procs.get(&trunc15)
+                {
+                    return Some(v);
+                }
+                let trunc14: String = key.chars().take(14).collect();
+                if trunc14.len() < key.len() {
+                    norm_procs.get(&trunc14)
                 } else {
                     None
                 }
@@ -228,18 +251,28 @@ pub(crate) fn list_gui() -> Vec<RunningApp> {
         return filter_by_desktop_hints(all);
     }
 
-    // X11: filter by PIDs that own visible windows
-    let windowed_pids = super::window_focus::pids_with_visible_windows();
-    if windowed_pids.is_empty() {
-        // Fallback if X11 query failed
+    // X11: enumerate visible windows with WM_CLASS + (optional) _NET_WM_PID.
+    // We use WM_CLASS as a second matching axis because:
+    //   • LibreOffice's /proc Name is `soffice.bin` — no `libreoffice-*.desktop`
+    //     Exec matches it — but every LibreOffice window's WM_CLASS instance
+    //     (`libreoffice-writer`, `libreoffice-calc`, …) matches the
+    //     corresponding desktop's `StartupWMClass`.
+    //   • Many Electron/Java apps (Postman, Discord, Element, …) don't set
+    //     `_NET_WM_PID`, so the PID-only filter drops them entirely. WM_CLASS
+    //     matching recovers them without needing the PID.
+    let windows = super::window_focus::list_visible_windows();
+    if windows.is_empty() {
+        // X11 query failed (no X server, no _NET_CLIENT_LIST, etc.)
         return filter_by_desktop_hints(all);
     }
 
-    // For multi-process apps, also include parent PIDs. A process may spawn
-    // children that own the window while the parent is what we matched.
+    // Pass 1: existing /proc-name-matched apps, filtered to those whose PID
+    // (or its parent) owns a visible window. Apps whose windows omit
+    // _NET_WM_PID won't survive this pass; pass 2 catches them.
+    let windowed_pids: std::collections::HashSet<u32> =
+        windows.iter().filter_map(|w| w.pid).collect();
     let mut expanded_pids = windowed_pids.clone();
     for &pid in &windowed_pids {
-        // Walk up parent chain
         if let Ok(status) = fs::read_to_string(format!("/proc/{pid}/status"))
             && let Some(ppid) =
                 parse_status_field(&status, "PPid:").and_then(|v| v.parse::<u32>().ok())
@@ -247,10 +280,75 @@ pub(crate) fn list_gui() -> Vec<RunningApp> {
             expanded_pids.insert(ppid);
         }
     }
+    let mut result: Vec<RunningApp> = all
+        .into_iter()
+        .filter(|app| expanded_pids.is_empty() || expanded_pids.contains(&app.pid))
+        .collect();
+    let mut seen_desktop_ids: std::collections::HashSet<String> =
+        result.iter().filter_map(|a| a.desktop_id.clone()).collect();
 
-    all.into_iter()
-        .filter(|app| expanded_pids.contains(&app.pid))
-        .collect()
+    // Pass 2: enrich with WM_CLASS-derived matches. Scan desktop files again
+    // (cheap — filesystem cache is hot) and pair each visible window's
+    // WM_CLASS with a desktop entry's StartupWMClass / file-stem fallback.
+    let desktop_entries = scan_desktop_files();
+    let mut class_map: std::collections::HashMap<String, &DesktopEntry> =
+        std::collections::HashMap::new();
+    for de in &desktop_entries {
+        for key in desktop_wm_class_keys(de) {
+            class_map.entry(key).or_insert(de);
+        }
+    }
+    for win in &windows {
+        for candidate in [win.instance.as_str(), win.class.as_str()] {
+            if candidate.is_empty() {
+                continue;
+            }
+            let Some(de) = class_map.get(candidate) else {
+                continue;
+            };
+            let desktop_id = format!("app:{}", de.path);
+            if !seen_desktop_ids.insert(desktop_id.clone()) {
+                continue;
+            }
+            result.push(RunningApp {
+                name: de.name.clone(),
+                pid: win.pid.unwrap_or(0),
+                desktop_id: Some(desktop_id),
+                exec: Some(de.exec.clone()),
+            });
+            break;
+        }
+    }
+
+    result.sort_by_key(|a| a.name.to_lowercase());
+    result
+}
+
+/// All lowercased keys a desktop entry can be matched against by `WM_CLASS`.
+/// Includes the declared `StartupWMClass`, the file stem (often the
+/// canonical class — e.g. `discord.desktop` → `discord`), and a kebab form
+/// of reverse-DNS stems (`org.gnome.TextEditor` → `gnome-texteditor`).
+fn desktop_wm_class_keys(de: &DesktopEntry) -> Vec<String> {
+    let mut keys = Vec::new();
+    if let Some(ref wc) = de.wm_class {
+        let k = wc.to_lowercase();
+        if !k.is_empty() {
+            keys.push(k);
+        }
+    }
+    if let Some(stem) = Path::new(&de.path).file_stem().and_then(|s| s.to_str()) {
+        let lower = stem.to_lowercase();
+        if !lower.is_empty() && !keys.contains(&lower) {
+            keys.push(lower);
+        }
+        if let Some(kebab) = kebab_from_appid(stem) {
+            let k = kebab.to_lowercase();
+            if !keys.contains(&k) {
+                keys.push(k);
+            }
+        }
+    }
+    keys
 }
 
 /// Heuristic filter for GNOME Wayland (no wlr, no X11 window list).
@@ -434,6 +532,10 @@ pub(crate) fn kill(pid: u32) -> Result<String, String> {
 struct DesktopEntry {
     name: String,
     exec: String,
+    /// `StartupWMClass=` field, used to match against X11 windows' `WM_CLASS`
+    /// when /proc-name → Exec matching fails (LibreOffice, Postman, Discord,
+    /// and friends). None if the desktop file doesn't declare it.
+    wm_class: Option<String>,
     path: String,
 }
 
@@ -474,6 +576,7 @@ fn parse_desktop_entry(path: &str) -> Option<DesktopEntry> {
     let content = fs::read_to_string(path).ok()?;
     let mut name = None;
     let mut exec = None;
+    let mut wm_class = None;
     let mut no_display = false;
     let mut in_desktop_entry = false;
 
@@ -492,6 +595,8 @@ fn parse_desktop_entry(path: &str) -> Option<DesktopEntry> {
             }
         } else if let Some(val) = line.strip_prefix("Exec=") {
             exec = Some(val.trim().to_string());
+        } else if let Some(val) = line.strip_prefix("StartupWMClass=") {
+            wm_class = Some(val.trim().to_string());
         } else if let Some(val) = line.strip_prefix("NoDisplay=") {
             no_display = val.trim().eq_ignore_ascii_case("true");
         }
@@ -504,6 +609,7 @@ fn parse_desktop_entry(path: &str) -> Option<DesktopEntry> {
     Some(DesktopEntry {
         name: name?,
         exec: exec?,
+        wm_class,
         path: path.to_string(),
     })
 }
@@ -693,6 +799,109 @@ mod tests {
         let trunc: String = key.chars().take(15).collect();
         assert_eq!(trunc, "org.gnome.weath");
         assert!(trunc.len() < key.len());
+    }
+
+    #[test]
+    fn nixos_wrapper_14char_truncation_matches_long_binary() {
+        // For a binary like `gnome-text-editor` (17 chars), the NixOS wrapper
+        // form `.gnome-text-editor-wrapped` is truncated by /proc/<pid>/comm to
+        // `.gnome-text-edi` — the leading dot eats one slot, leaving only 14
+        // chars of the base. `normalize_proc_name` strips the dot and yields a
+        // 14-char key. The 15-char truncation of "gnome-text-editor" produces
+        // "gnome-text-edit" which DOESN'T match, so the lookup must also try
+        // 14 chars to catch this case.
+        let proc_name = ".gnome-text-edi"; // exactly what /proc shows on NixOS
+        let candidates = normalize_proc_name(proc_name);
+        assert!(
+            candidates.contains(&"gnome-text-edi".to_string()),
+            "stripped form must be in candidates"
+        );
+        let key = "gnome-text-editor".to_lowercase();
+        let trunc15: String = key.chars().take(15).collect();
+        let trunc14: String = key.chars().take(14).collect();
+        assert_ne!(trunc15, "gnome-text-edi", "15-char trunc doesn't help here");
+        assert_eq!(trunc14, "gnome-text-edi", "14-char trunc is the match");
+    }
+
+    #[test]
+    fn primary_desktop_entries_sort_before_game_shortcuts() {
+        // Steam game shortcuts (`~/.local/share/applications/Dota 2.desktop`
+        // with `Exec=steam steam://run/570`) shouldn't shadow `steam.desktop`
+        // when matching against the `steam` /proc entry. The sort key in
+        // `list()` prioritizes desktop entries whose file stem matches a bin
+        // name in their own Exec. Mirror that logic here as a regression check.
+        let entries = vec![
+            DesktopEntry {
+                name: "Dota 2".into(),
+                exec: "steam steam://run/570".into(),
+                wm_class: None,
+                path: "/home/u/.local/share/applications/Dota 2.desktop".into(),
+            },
+            DesktopEntry {
+                name: "Steam".into(),
+                exec: "steam %U".into(),
+                wm_class: None,
+                path: "/usr/share/applications/steam.desktop".into(),
+            },
+        ];
+        let mut sorted = entries;
+        sorted.sort_by_key(|de| {
+            let stem = std::path::Path::new(&de.path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let bins = extract_bin_names(&de.exec);
+            let primary = bins.iter().any(|b| b.to_lowercase() == stem);
+            (if primary { 0 } else { 1 }, stem)
+        });
+        assert_eq!(sorted[0].name, "Steam", "primary entry must come first");
+        assert_eq!(sorted[1].name, "Dota 2");
+    }
+
+    #[test]
+    fn wm_class_keys_cover_libreoffice_and_discord() {
+        // LibreOffice Writer: declared StartupWMClass is the match anchor.
+        let writer = DesktopEntry {
+            name: "LibreOffice Writer".into(),
+            exec: "libreoffice --writer %U".into(),
+            wm_class: Some("libreoffice-writer".into()),
+            path: "/usr/share/applications/libreoffice-writer.desktop".into(),
+        };
+        let keys = desktop_wm_class_keys(&writer);
+        assert!(
+            keys.contains(&"libreoffice-writer".to_string()),
+            "StartupWMClass must be a matching key"
+        );
+
+        // Discord: no StartupWMClass declared; the file stem alone must
+        // match the window's WM_CLASS instance (`discord`).
+        let discord = DesktopEntry {
+            name: "Discord".into(),
+            exec: "/usr/bin/discord %U".into(),
+            wm_class: None,
+            path: "/usr/share/applications/discord.desktop".into(),
+        };
+        let keys = desktop_wm_class_keys(&discord);
+        assert!(
+            keys.contains(&"discord".to_string()),
+            "file stem must be a matching key when StartupWMClass is absent"
+        );
+
+        // Reverse-DNS desktop stems should also produce a kebab fallback
+        // (org.gnome.TextEditor → gnome-texteditor) for GTK apps whose
+        // WM_CLASS is the short form.
+        let te = DesktopEntry {
+            name: "Text Editor".into(),
+            exec: "gnome-text-editor %U".into(),
+            wm_class: None,
+            path: "/usr/share/applications/org.gnome.TextEditor.desktop".into(),
+        };
+        let keys = desktop_wm_class_keys(&te);
+        assert!(
+            keys.contains(&"gnome-texteditor".to_string()),
+            "kebab from reverse-DNS stem must be a matching key"
+        );
     }
 
     #[test]
