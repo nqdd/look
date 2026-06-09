@@ -106,7 +106,7 @@ extension LauncherView {
     }
 
     private func isURLScheme(_ target: String) -> Bool {
-        target.contains(":") && !target.hasPrefix("/")
+        DeleteTargetLogic.isURLScheme(target)
     }
 
     private func recordOpen(_ selected: LauncherResult, action: String) {
@@ -282,6 +282,148 @@ extension LauncherView {
             style: .info,
             duration: AppConstants.Launcher.Clipboard.infoBannerDuration
         )
+    }
+
+    // MARK: - Delete to Trash
+
+    /// File/folder targets the delete action should act on: the picked basket
+    /// when non-empty, otherwise the single selected result. Non-deletable
+    /// kinds, URL-scheme paths, and items gone from disk are filtered out by
+    /// `DeleteTargetLogic.eligible`.
+    func eligibleDeleteTargets() -> [DeleteCommand.Target] {
+        let candidates: [LauncherResult]
+        if !pickedKeys.isEmpty {
+            candidates = pickedKeys.compactMap { pickedResultsByKey[$0] }
+        } else if let selectedResultID,
+                  let selected = displayedResults.first(where: { $0.id == selectedResultID }) {
+            candidates = [selected]
+        } else {
+            candidates = []
+        }
+
+        return DeleteTargetLogic
+            .eligible(from: candidates, fileExists: { FileManager.default.fileExists(atPath: $0) })
+            .map { result in
+                DeleteCommand.Target(
+                    id: result.id,
+                    displayName: result.title,
+                    path: result.path,
+                    kind: result.kind,
+                    icon: NSWorkspace.shared.icon(forFile: result.path)
+                )
+            }
+    }
+
+    /// Cmd+D entry point. Files/folders move to Trash immediately (recoverable,
+    /// no confirmation — like Finder's Cmd+Delete). When the single selection is
+    /// the Trash quick folder, routes to Empty Trash, which DOES confirm because
+    /// it's permanent.
+    func requestDeleteSelection() {
+        guard !isCommandMode, !appUIState.showsThemeSettings, !showsHelpScreen else { return }
+        // Don't stack an Empty Trash confirmation, nor start work while a
+        // previous trash/empty is still running (recycle / Finder are async).
+        guard pendingEmptyTrashCount == nil, !isDeleteInFlight else { return }
+
+        // Cmd+D on the pinned Trash folder empties it rather than trashing it.
+        if pickedKeys.isEmpty,
+           let selectedResultID,
+           let selected = displayedResults.first(where: { $0.id == selectedResultID }),
+           selected.kind == .folder,
+           DeleteTargetLogic.isTrashPath(selected.path, homeDirectory: NSHomeDirectory()) {
+            // Count comes from Finder (TCC blocks reading ~/.Trash directly);
+            // this is the right moment to prompt for Automation permission.
+            guard let count = EmptyTrashCommand.itemCount() else {
+                showBanner(
+                    "Allow Look to control Finder in System Settings ▸ Privacy ▸ Automation to empty the Trash",
+                    style: .error,
+                    duration: 2.8
+                )
+                return
+            }
+            guard count > 0 else {
+                showBanner("Trash is already empty", style: .info, duration: 1.2)
+                return
+            }
+            pendingEmptyTrashCount = count
+            return
+        }
+
+        let targets = eligibleDeleteTargets()
+        guard !targets.isEmpty else {
+            showBanner("Select a file or folder to delete", style: .info, duration: 1.2)
+            return
+        }
+        // Recoverable — trash straight away, no confirmation.
+        runDeleteCommand(targets: targets)
+    }
+
+    /// Confirm/cancel only apply to the permanent Empty Trash prompt now.
+    func confirmDeleteSelection() {
+        guard pendingEmptyTrashCount != nil else { return }
+        pendingEmptyTrashCount = nil
+        runEmptyTrash()
+    }
+
+    func cancelDeleteSelection() {
+        pendingEmptyTrashCount = nil
+    }
+
+    private func runEmptyTrash() {
+        isDeleteInFlight = true
+        // Finder's "empty the trash" can take seconds on a large Trash; run it
+        // off the main thread so the launcher window stays responsive.
+        EmptyTrashCommand.empty { [self] error in
+            isDeleteInFlight = false
+            if let error {
+                showBanner(error, style: .error, duration: 2.6)
+            } else {
+                showBanner("Emptied Trash", style: .success, duration: 1.6)
+            }
+        }
+    }
+
+    private func runDeleteCommand(targets: [DeleteCommand.Target]) {
+        let targetsByID = Dictionary(targets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+        isDeleteInFlight = true
+        DeleteCommand.trash(targets) { [self] outcome in
+            isDeleteInFlight = false
+            let trashed = Set(outcome.trashedIDs)
+
+            // Drop trashed items from the picked basket.
+            for id in outcome.trashedIDs {
+                guard let target = targetsByID[id] else { continue }
+                let key = "\(target.kind.rawValue)|\(target.path)"
+                if let idx = pickedKeys.firstIndex(of: key) {
+                    pickedKeys.remove(at: idx)
+                    pickedResultsByKey.removeValue(forKey: key)
+                }
+            }
+            if pickedKeys.isEmpty {
+                NSPasteboard.general.clearContents()
+            } else {
+                writePickedToPasteboard()
+            }
+
+            // Drop the trashed rows from the on-screen results immediately — the
+            // background index refresh below is async and would otherwise leave
+            // the now-gone items visible (and un-previewable) until the next search.
+            backendResults.removeAll { trashed.contains($0.id) }
+
+            // Keep selection valid if it pointed at a now-removed row.
+            if let selectedResultID, !displayedResults.contains(where: { $0.id == selectedResultID }) {
+                self.selectedResultID = displayedResults.first?.id
+            }
+
+            let message = DeleteTargetLogic.resultMessage(
+                trashedCount: outcome.trashedCount,
+                failureCount: outcome.failures.count,
+                firstFailure: outcome.firstFailure
+            )
+            showBanner(message.text, style: message.isError ? .error : .success, duration: message.isError ? 2.0 : 1.4)
+
+            _ = bridge.requestIndexRefresh()
+        }
     }
 
     func refreshClipboardSelectionIfNeeded() {

@@ -59,6 +59,12 @@ struct LauncherView: View {
     @State var lookupPreviewTask: Task<Void, Never>?
     @State var selectedKillSuggestionIndex: Int?
     @State var pendingKillCandidate: KillCommand.Candidate?
+    // nil == no empty-Trash confirmation pending; otherwise the item count to show.
+    // (Moving files/folders to Trash is recoverable, so it skips confirmation;
+    // only the permanent Empty Trash prompts.)
+    @State var pendingEmptyTrashCount: Int?
+    // True while a trash/empty operation is running, to block re-triggering it.
+    @State var isDeleteInFlight = false
     @State var killListRefreshTick: Int = 0
     @State var recentlyKilledPIDs: Set<Int32> = []
     @State var showsHelpScreen = false
@@ -200,7 +206,7 @@ struct LauncherView: View {
                 id: "\(AppConstants.Launcher.QuickFolder.idPrefix)\(normalizedTitle)",
                 kind: .folder,
                 title: entry.title,
-                subtitle: AppConstants.Launcher.QuickFolder.pinnedSubtitle,
+                subtitle: entry.subtitle ?? AppConstants.Launcher.QuickFolder.pinnedSubtitle,
                 path: folderPath,
                 score: AppConstants.Launcher.Finder.pinnedScore
             )
@@ -338,7 +344,7 @@ struct LauncherView: View {
             return ["Enter copy clip", "Delete remove clip", "Cmd+H help", "Cmd+/ command mode"]
         }
 
-        return ["Enter open", "Cmd+F reveal", "Cmd+H help", "Cmd+/ command mode"]
+        return ["Enter open", "Cmd+F reveal", "Cmd+D trash", "Cmd+H help", "Cmd+/ command mode"]
     }
 
     var commandNamePart: String {
@@ -374,6 +380,10 @@ struct LauncherView: View {
         isCommandMode
             && activeCommandID == AppConstants.Launcher.Command.kill
             && pendingKillCandidate != nil
+    }
+
+    var isDeleteConfirmationVisible: Bool {
+        !isCommandMode && pendingEmptyTrashCount != nil
     }
 
     var liveCommandPreview: String? {
@@ -444,6 +454,11 @@ struct LauncherView: View {
             clipboardStore.setMonitoringMode(.background)
         }
         .onChange(of: query) { _, _ in
+            // Editing the query dismisses a pending Empty Trash confirmation,
+            // mirroring how the kill command clears its pending candidate.
+            if pendingEmptyTrashCount != nil {
+                pendingEmptyTrashCount = nil
+            }
             if !isCommandMode, let cmd = extractInlineCommand(from: query), cmd.hasSpace {
                 enterCommandMode(commandID: cmd.id, prefilledInput: cmd.args)
                 return
@@ -576,7 +591,8 @@ struct LauncherView: View {
         .modifier(PanelDecorationsModifier(
             testHint: { testHintOverlay },
             copyright: { copyrightOverlay },
-            killBar: { killConfirmationOverlay }
+            killBar: { killConfirmationOverlay },
+            deleteBar: { deleteConfirmationOverlay }
         ))
         .layoutPriority(1)
     }
@@ -644,7 +660,7 @@ struct LauncherView: View {
                 Spacer(minLength: 0)
             }
 
-            if !isKillConfirmationVisible {
+            if !isKillConfirmationVisible && !isDeleteConfirmationVisible {
                 HintBar(hint: currentHint, themeStore: themeStore)
             }
         }
@@ -772,18 +788,34 @@ struct LauncherView: View {
         }
     }
 
+    @ViewBuilder
+    private var deleteConfirmationOverlay: some View {
+        if !isCommandMode, let pendingEmptyTrashCount {
+            EmptyTrashConfirmationBar(
+                itemCount: pendingEmptyTrashCount,
+                themeStore: themeStore,
+                onConfirm: { confirmDeleteSelection() },
+                onCancel: { cancelDeleteSelection() }
+            )
+            .padding(.horizontal, 14)
+            .padding(.bottom, 24)
+        }
+    }
+
 
 }
 
-private struct PanelDecorationsModifier<TestHint: View, Copyright: View, KillBar: View>: ViewModifier {
+private struct PanelDecorationsModifier<TestHint: View, Copyright: View, KillBar: View, DeleteBar: View>: ViewModifier {
     @ViewBuilder let testHint: () -> TestHint
     @ViewBuilder let copyright: () -> Copyright
     @ViewBuilder let killBar: () -> KillBar
+    @ViewBuilder let deleteBar: () -> DeleteBar
 
     func body(content: Content) -> some View {
         content
             .overlay(alignment: .topTrailing, content: testHint)
             .overlay(alignment: .bottomTrailing, content: copyright)
             .overlay(alignment: .bottom, content: killBar)
+            .overlay(alignment: .bottom, content: deleteBar)
     }
 }
