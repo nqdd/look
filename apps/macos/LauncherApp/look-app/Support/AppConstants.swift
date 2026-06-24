@@ -115,6 +115,21 @@ enum AppConstants {
             /// Entries shown in the live discovery menu (excludes `"` itself).
             static var menuEntries: [Entry] { all.filter(\.listedInMenu) }
 
+            /// Discovery entries narrowed by `filter` - the text typed after the
+            /// leading `"`. Case-insensitive substring match against the prefix,
+            /// its display form, and the description, so `"folder` finds `d"` by
+            /// intent rather than only by the cryptic prefix letter. An empty
+            /// filter returns the full menu.
+            static func menuEntries(matching filter: String) -> [Entry] {
+                let needle = filter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !needle.isEmpty else { return menuEntries }
+                return menuEntries.filter {
+                    $0.prefix.lowercased().contains(needle)
+                        || $0.displayWithArg.lowercased().contains(needle)
+                        || $0.description.lowercased().contains(needle)
+                }
+            }
+
             static let all: [Entry] = [
                 Entry(
                     prefix: QueryPrefix.discovery, argHint: "",
@@ -288,6 +303,32 @@ enum AppConstants {
             AppCommand(id: Command.shell, title: "shell (⌘4)", detail: "Run a shell command", placeholder: "Type shell command"),
             AppCommand(id: Command.sys, title: "sys (⌘5)", detail: "Show system information", placeholder: "View system info"),
         ]
+
+        /// Commands narrowed by `filter` - the text typed after a leading `:`.
+        /// Case-insensitive substring match against the command id and its
+        /// description, so `:end` or `:process` both surface `kill`. An empty
+        /// filter returns the whole catalog.
+        static func commandCatalog(matching filter: String) -> [AppCommand] {
+            let needle = filter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !needle.isEmpty else { return commandCatalog }
+            return commandCatalog.filter {
+                $0.id.lowercased().contains(needle)
+                    || $0.detail.lowercased().contains(needle)
+            }
+        }
+
+        // Command-discovery rows (type `:`). Like PrefixSuggestion, these are
+        // Swift-synthesized rows in the main results list, told apart by id;
+        // `openSelectedApp` enters the command instead of opening a file.
+        enum CommandSuggestion {
+            static let resultIDPrefix = "cmdhint:"
+
+            /// Recovers the command id encoded in a discovery-row result id, or nil.
+            static func commandID(fromResultID resultID: String) -> String? {
+                guard resultID.hasPrefix(resultIDPrefix) else { return nil }
+                return String(resultID.dropFirst(resultIDPrefix.count))
+            }
+        }
 
         static let normalHint = HintText.Launcher.normal
         static let commandHint = HintText.Launcher.command
