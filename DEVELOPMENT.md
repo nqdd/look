@@ -203,7 +203,4 @@ Signing/notarization walkthrough: [docs/apple-developer-release-guide.md](docs/a
 - [docs/backend-guide.md](docs/backend-guide.md) — backend edit targets and verification
 - [docs/user-guide.md](docs/user-guide.md) — user guide
 - [docs/features.md](docs/features.md) — feature status
-- [docs/tasks.md](docs/tasks.md) — task breakdown
-- [docs/roadmap.md](docs/roadmap.md) — roadmap
-- [docs/decisions/](docs/decisions/) — architecture decision records
 - [apps/linows/BUILDING.md](apps/linows/BUILDING.md) — linows build, packaging, and install methods
