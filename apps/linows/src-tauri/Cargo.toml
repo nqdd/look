@@ -5,13 +5,13 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
-tauri = { version = "2.11.1", features = ["tray-icon", "protocol-asset"] }
+tauri = { version = "2.11.1", features = ["protocol-asset"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
 look-answers = { path = "../../../core/answers" }
 look-engine = { path = "../../../core/engine" }
-look-indexing = { path = "../../../core/indexing" }
 look-storage = { path = "../../../core/storage" }
+look-todo = { path = "../../../core/todo" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 notify = "6"
@@ -27,6 +27,8 @@ trash = "5"
 x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
 zbus = "5"
 tokio = { version = "1.52.3", features = ["rt"] }
+# StreamExt for zbus signal streams.
+futures-util = { version = "0.3", default-features = false }
 webkit2gtk = "2.0"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 wayland-client = { version = "0.31", default-features = false }
@@ -35,7 +37,6 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"], default-featur
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
-    "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_NetworkManagement_IpHelper",
     "Win32_System_Com",

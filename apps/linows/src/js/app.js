@@ -6,6 +6,8 @@ import * as picked from './components/picked.js';
 import * as banner from './components/banner.js';
 import * as confirm from './components/confirm.js';
 import * as commands from './screens/commands/index.js';
+import * as todoCmd from './screens/commands/todo.js';
+import { listChecks } from './icons.js';
 import * as settings from './screens/settings.js';
 import { mountUpdateWidget } from './screens/update_widget.js';
 import * as translatePanel from './components/translate.js';
@@ -74,7 +76,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   mountUpdateWidget(document.getElementById('settings-about'), { label: 'About' });
   mountUpdateWidget(document.getElementById('help-update'));
 
-  // Hint bar — always at bottom, shared by all screens
+  // Hint bar: always at bottom, shared by all screens
   app.insertAdjacentHTML('beforeend',
     `<div class="hint-bar" id="hint-bar"><span></span><span class="hint-bar-copy">\u00A9 2026 by <a class="hint-bar-link" href="#">Kunkka</a></span></div>`);
 
@@ -83,6 +85,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await Promise.all([
     load('html/screens/commands/calc.html', cmdMain),
     load('html/screens/commands/pomo.html', cmdMain),
+    load('html/screens/commands/todo.html', cmdMain),
     load('html/screens/commands/kill.html', cmdMain),
     load('html/screens/commands/shell.html', cmdMain),
     load('html/screens/commands/sys.html', cmdMain),
@@ -97,7 +100,58 @@ document.addEventListener('DOMContentLoaded', async () => {
   const contentArea = document.getElementById('search-content');
   const resultsArea = document.getElementById('results-area');
   const aiCardEl = document.getElementById('ai-answer-card');
-  setHint(hintMessage, HINT_MAIN);
+
+  // Todo quick view: when today has tasks, the last main-hint item
+  // ("Ctrl+/: Command mode") is swapped for a clickable "Todo X/Y" stat with
+  // an "Unfinished today" hover bubble. Mirrors macOS HintBar.TodoQuickView:
+  // home screen only, hidden when today is empty.
+  let todoQuick = null;
+
+  function renderMainHint() {
+    if (!todoQuick || todoQuick.total === 0) {
+      setHint(hintMessage, HINT_MAIN);
+      return;
+    }
+    setHint(hintMessage, HINT_MAIN.slice(0, HINT_MAIN.lastIndexOf(' • ')));
+    hintMessage.insertAdjacentHTML('beforeend', ' <span class="hint-sep">•</span> ');
+    const widget = document.createElement('span');
+    widget.className = 'hint-todo';
+    widget.innerHTML = `${listChecks} Todo <b>${todoQuick.done}/${todoQuick.total}</b>`;
+    if (todoQuick.open.length > 0) {
+      const bubble = document.createElement('div');
+      bubble.className = 'hint-todo-bubble';
+      const title = document.createElement('div');
+      title.className = 'hint-todo-bubble-title';
+      title.textContent = 'Unfinished today';
+      bubble.appendChild(title);
+      for (const name of todoQuick.open) {
+        const row = document.createElement('div');
+        row.className = 'hint-todo-bubble-task';
+        row.textContent = `• ${name}`;
+        bubble.appendChild(row);
+      }
+      widget.appendChild(bubble);
+    }
+    widget.addEventListener('click', () => {
+      commands.enterById('todo');
+      enterCommandMode();
+      queryInput.value = '';
+    });
+    hintMessage.appendChild(widget);
+  }
+
+  function isHomeHintContext() {
+    return !commands.isActive() && !settings.isActive()
+      && !search.isTranslateMode() && !search.isClipboardMode()
+      && !search.isPrefixHintMode() && !search.isCommandHintMode();
+  }
+
+  todoCmd.setOnQuickChange((stat) => {
+    todoQuick = stat;
+    if (isHomeHintContext()) renderMainHint();
+  });
+
+  renderMainHint();
 
   // Snapshot of the latest results + AI state, used by applyAiLayoutMode()
   // to pick full / two-col / stacked. Mirrors macOS LauncherView resultsRow.
@@ -146,7 +200,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     queryInput.value = '';
     search.handleQueryInput('');
     queryInput.focus();
-    setHint(hintMessage, HINT_MAIN);
+    renderMainHint();
   });
   settings.restoreOnStartup();
 
@@ -158,7 +212,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     runningApps.setEnabled(on);
     if (on) runningApps.refresh();
 
-    // AI / web answers — default ON to match the default_config.txt setting
+    // AI / web answers: default ON to match the default_config.txt setting
     // (and macOS, which ships aiEnabled=true). Honour the persisted value if
     // the user has flipped it. Propagated to both the controller (gates the
     // card) and search.js (gates web suggestions).
@@ -182,7 +236,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   keyboard.setCommandMode(commands);
 
   // Update right panel when selection changes. Discovery rows have nothing
-  // to preview (synthetic, empty path) — let the list span full width instead
+  // to preview (synthetic, empty path); let the list span full width instead
   // of showing an empty pane (matches macOS LauncherView.swift:872).
   results.setOnSelectionChange((item) => {
     if (results.hasPickedItems()) return;
@@ -221,7 +275,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Wire search -> results. After rendering, drive the AI controller with
-  // the LOCAL result count (websuggest: rows don't count — a query that
+  // the LOCAL result count (websuggest: rows don't count: a query that
   // only matches web suggestions is treated as zero local results, which is
   // the macOS knowledge-lookup trigger). Prefix-driven modes (t"/c"/rc"/
   // "/:) own the result area and must NOT trigger AI/web lookups. A query
@@ -240,7 +294,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Pick stacked / two-col purely from the local-result count, ignoring the
   // controller state and the suggestion-arrival timing. This is what
-  // eliminates the 2–3 second "card width zooms out" shift the user sees:
+  // eliminates the 2-3 second "card width zooms out" shift the user sees:
   // engine returns first (empty), then 2 s later web suggestions arrive,
   // and the OLD logic reacted to every intermediate state with a different
   // mode. Now the only thing that matters is "are there any local rows":
@@ -260,12 +314,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     resultsArea.classList.add(hasLocal ? AI_LAYOUT_STACKED : AI_LAYOUT_TWO_COL);
   }
 
-  // :cmd <args> live trigger — jumps straight into that command's panel with
+  // :cmd <args> live trigger: jumps straight into that command's panel with
   // the rest of the text prefilled (e.g. `:calc 2+2`, `:kill chrome`). Bare
   // `:calc` without a trailing space stays in the discovery menu (matches
   // macOS extractInlineCommand semantics); the user can press Enter on the
   // highlighted row to enter the command with empty input.
-  const CMD_PREFIX_MAP = { calc: 'calc', pomo: 'pomo', kill: 'kill', shell: 'shell', sys: 'sys' };
+  const CMD_PREFIX_MAP = { calc: 'calc', pomo: 'pomo', todo: 'todo', kill: 'kill', shell: 'shell', sys: 'sys' };
 
   function tryCommandPrefix(value) {
     if (!value.startsWith(':')) return false;
@@ -321,14 +375,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (runningApps.isEnabled()) runningApps.refresh();
       translatePanel.hide();
     } else {
-      setHint(hintMessage, HINT_MAIN);
+      renderMainHint();
       resultsList.hidden = false;
       runningApps.setSuspended(false);
       if (runningApps.isEnabled()) runningApps.refresh();
       translatePanel.hide();
       // While the AI card is active, the results list holds web-suggestion
       // rows. Those routinely return empty (DDG rate-limits, transient
-      // failures) — render nothing instead of "No results" so the right
+      // failures); render nothing instead of "No results" so the right
       // column doesn't shout an error when the left card is working fine.
       const empty = search.isRecentMode()
         ? 'recent'
@@ -379,6 +433,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     queryInput.select();
     requestIndexRefresh();
     runningApps.refresh();
+    // Re-read todos when nothing would be lost, so the quick view stays
+    // fresh across day rollovers and edits from other Look clients.
+    todoCmd.reloadIfClean();
   });
 
   onIndexReady(() => {
@@ -410,7 +467,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     resultsList.hidden = true;
     previewPanel.hidden = true;
     runningApps.setSuspended(true);
-    // Tear down any active AI card — command mode owns the whole content
+    // Tear down any active AI card; command mode owns the whole content
     // area, and a stale card would peek through. Matches macOS, which
     // calls aiAnswer.cancel() whenever it switches into command mode.
     aiAnswer.cancel();
@@ -423,22 +480,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     const cmd = commands.getActiveCommand();
     if (cmd === 'pomo') {
       setHint(hintMessage,
-        'Space: Start/pause \u2022 R: Reset \u2022 P: Music \u2022 Esc: Back \u2022 Tab/Ctrl+1-5: Switch');
+        'Space: Start/pause \u2022 R: Reset \u2022 P: Music \u2022 Esc: Back \u2022 Tab/Ctrl+1-6: Switch');
+    } else if (cmd === 'todo') {
+      setHint(hintMessage,
+        'Ctrl+N: Switch page \u2022 Ctrl+S: Save \u2022 Tab/Ctrl+1-6: Switch \u2022 Esc: Back');
     } else if (cmd === 'kill') {
       setHint(hintMessage,
-        'Y: Confirm \u2022 N: Cancel \u2022 Tab/Ctrl+1-5: Switch \u2022 Esc: Back');
+        'Y: Confirm \u2022 N: Cancel \u2022 Tab/Ctrl+1-6: Switch \u2022 Esc: Back');
     } else if (cmd === 'sys') {
       setHint(hintMessage,
-        'Esc: Back \u2022 Tab/Ctrl+1-5: Switch \u2022 Ctrl+/: Command mode \u2022 Ctrl+Shift+,: Settings');
+        'Esc: Back \u2022 Tab/Ctrl+1-6: Switch \u2022 Ctrl+/: Command mode \u2022 Ctrl+Shift+,: Settings');
     } else if (cmd === 'calc') {
       setHint(hintMessage,
-        'Enter: Evaluate \u2022 Tab: Select \u2022 Ctrl+1-5: Switch \u2022 Esc: Back');
+        'Enter: Evaluate \u2022 Tab: Select \u2022 Ctrl+1-6: Switch \u2022 Esc: Back');
     } else if (cmd === 'shell') {
       setHint(hintMessage,
-        'Enter: Run \u2022 Tab: Select \u2022 Ctrl+1-5: Switch \u2022 Esc: Back');
+        'Enter: Run \u2022 Tab: Select \u2022 Ctrl+1-6: Switch \u2022 Esc: Back');
     } else {
       setHint(hintMessage,
-        'Enter: Run \u2022 Tab: Select \u2022 Ctrl+1-5: Switch \u2022 Esc: Back');
+        'Enter: Run \u2022 Tab: Select \u2022 Ctrl+1-6: Switch \u2022 Esc: Back');
     }
   }
 
@@ -447,7 +507,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     resultsList.hidden = false;
     previewPanel.hidden = false;
     translatePanel.hide();
-    setHint(hintMessage, HINT_MAIN);
+    renderMainHint();
     queryInput.value = '';
     search.handleQueryInput('');
     queryInput.focus();

@@ -153,6 +153,18 @@ export async function translate(text, targetLang) {
   return invoke('translate', { text, targetLang });
 }
 
+// Todo: full-set load/save against the shared look-todo store. Tasks are
+// `{ id, name, done, due_date, created_at_unix_s }` (same JSON contract as
+// the macOS FFI bridge).
+
+export async function todoList() {
+  return invoke('todo_list');
+}
+
+export async function todoSave(tasks) {
+  return invoke('todo_save', { tasks });
+}
+
 export async function onWindowShown(callback) {
   return listen('window-shown', callback);
 }
@@ -213,7 +225,7 @@ export async function emptyTrash() {
   return invoke('empty_trash');
 }
 
-// AI / web answers — see src-tauri/src/answers.rs. Each returns an Answer
+// AI / web answers: see src-tauri/src/answers.rs. Each returns an Answer
 // `{ text, source, url?, image_url? }` or null. The card UI ignores null.
 
 export async function instantHasMatch(query) {
