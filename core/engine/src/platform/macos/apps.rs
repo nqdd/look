@@ -3,10 +3,8 @@ use crate::index::APP_CANDIDATE_ID_PREFIX;
 use crate::platform::macos;
 use crate::platform::paths::{candidate_id_path_component, path_is_same_or_child};
 use look_indexing::{Candidate, CandidateKind};
-use plist::Value;
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
 use std::sync::mpsc;
 
 pub(crate) fn discover_installed_apps(config: &RuntimeConfig, tx: mpsc::SyncSender<Candidate>) {
@@ -76,6 +74,13 @@ fn walk_apps(
         };
 
         let app_path = entry.path();
+        let is_dir = file_type.is_dir();
+        let is_symlink_dir =
+            file_type.is_symlink() && fs::metadata(&app_path).map(|m| m.is_dir()).unwrap_or(false);
+        if !is_dir && !is_symlink_dir {
+            continue;
+        }
+
         let Some(app_path_str) = app_path.to_str() else {
             continue;
         };
@@ -84,8 +89,26 @@ fn walk_apps(
         }
 
         if app_path_str.ends_with(".app") {
-            send_app_candidate(&app_path, &file_type, app_path_str, tx, app_exclude_names);
-        } else if file_type.is_dir() {
+            let title = app_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("App")
+                .to_string();
+            if should_exclude_app_name(&title, app_exclude_names) {
+                continue;
+            }
+
+            let key = format!(
+                "{APP_CANDIDATE_ID_PREFIX}{}",
+                candidate_id_path_component(app_path_str)
+            );
+            let _ = tx.send(Candidate::new(
+                &key,
+                CandidateKind::App,
+                &title,
+                app_path_str,
+            ));
+        } else if is_dir {
             walk_apps(
                 app_path_str,
                 depth - 1,
@@ -95,69 +118,6 @@ fn walk_apps(
             );
         }
     }
-}
-
-fn send_app_candidate(
-    app_path: &Path,
-    file_type: &fs::FileType,
-    app_path_str: &str,
-    tx: &mpsc::SyncSender<Candidate>,
-    app_exclude_names: &[String],
-) {
-    if !is_app_bundle(file_type, app_path) {
-        return;
-    }
-
-    let fallback_title = app_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("App");
-    let title = app_title(app_path, fallback_title);
-    if should_exclude_app_name(&title, app_exclude_names)
-        || should_exclude_app_name(fallback_title, app_exclude_names)
-    {
-        return;
-    }
-
-    let key = format!(
-        "{APP_CANDIDATE_ID_PREFIX}{}",
-        candidate_id_path_component(app_path_str)
-    );
-    let _ = tx.send(Candidate::new(
-        &key,
-        CandidateKind::App,
-        &title,
-        app_path_str,
-    ));
-}
-
-fn is_app_bundle(file_type: &fs::FileType, app_path: &Path) -> bool {
-    file_type.is_dir()
-        || (file_type.is_symlink()
-            && fs::metadata(app_path)
-                .map(|metadata| metadata.is_dir())
-                .unwrap_or(false))
-}
-
-fn app_title(app_path: &Path, fallback_title: &str) -> String {
-    title_from_info_plist(app_path).unwrap_or_else(|| fallback_title.to_string())
-}
-
-fn title_from_info_plist(app_path: &Path) -> Option<String> {
-    let info_plist = app_path.join("Contents").join("Info.plist");
-    let value = Value::from_file(info_plist).ok()?;
-    let dict = value.as_dictionary()?;
-    ["CFBundleDisplayName", "CFBundleName"]
-        .into_iter()
-        .find_map(|key| plist_string(dict.get(key)))
-}
-
-fn plist_string(value: Option<&Value>) -> Option<String> {
-    value
-        .and_then(Value::as_string)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
 }
 
 fn should_exclude_path(path: &str, app_exclude_paths: &[String]) -> bool {
@@ -180,9 +140,7 @@ fn should_exclude_app_name(name: &str, app_exclude_names: &[String]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        app_title, merged_app_scan_roots, should_exclude_app_name, should_exclude_path, walk_apps,
-    };
+    use super::{merged_app_scan_roots, should_exclude_app_name, should_exclude_path, walk_apps};
     use look_indexing::Candidate;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -218,29 +176,9 @@ mod tests {
         }
     }
 
-    fn create_app(root: &Path, name: &str, display_name: Option<&str>) -> PathBuf {
+    fn create_app(root: &Path, name: &str) -> PathBuf {
         let app = root.join(name);
-        let contents = app.join("Contents");
-        fs::create_dir_all(&contents).expect("create app contents");
-        if let Some(display_name) = display_name {
-            fs::write(
-                contents.join("Info.plist"),
-                format!(
-                    r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleDisplayName</key>
-    <string>{display_name}</string>
-    <key>CFBundleName</key>
-    <string>Fallback Name</string>
-</dict>
-</plist>
-"#
-                ),
-            )
-            .expect("write Info.plist");
-        }
+        fs::create_dir_all(app.join("Contents")).expect("create app contents");
         app
     }
 
@@ -318,22 +256,6 @@ mod tests {
     }
 
     #[test]
-    fn app_title_prefers_bundle_display_name() {
-        let tmp = TempDir::new("title");
-        let app = create_app(tmp.path(), "Client Riot.app", Some("Riot Client"));
-
-        assert_eq!(app_title(&app, "Client Riot"), "Riot Client");
-    }
-
-    #[test]
-    fn app_title_falls_back_to_file_stem() {
-        let tmp = TempDir::new("fallback-title");
-        let app = create_app(tmp.path(), "Client Riot.app", None);
-
-        assert_eq!(app_title(&app, "Client Riot"), "Client Riot");
-    }
-
-    #[test]
     #[cfg(unix)]
     fn indexes_symlinked_app_bundle() {
         let tmp = TempDir::new("symlink-app");
@@ -341,14 +263,14 @@ mod tests {
         let scan_root = tmp.path().join("Applications");
         fs::create_dir_all(&real_root).expect("create real root");
         fs::create_dir_all(&scan_root).expect("create scan root");
-        let real_app = create_app(&real_root, "Riot Client.app", Some("Riot Client"));
+        let real_app = create_app(&real_root, "Riot Client.app");
         let link_app = scan_root.join("Client Riot.app");
         symlink_dir(&real_app, &link_app);
 
         let apps = collect_apps(&scan_root);
 
         assert_eq!(apps.len(), 1);
-        assert_eq!(apps[0].title.as_ref(), "Riot Client");
+        assert_eq!(apps[0].title.as_ref(), "Client Riot");
         assert_eq!(
             apps[0].path.as_ref(),
             link_app.to_str().expect("utf-8 symlink path")
@@ -363,7 +285,7 @@ mod tests {
         let scan_root = tmp.path().join("Applications");
         fs::create_dir_all(&real_root).expect("create real root");
         fs::create_dir_all(&scan_root).expect("create scan root");
-        create_app(&real_root, "Nested.app", Some("Nested"));
+        create_app(&real_root, "Nested.app");
         symlink_dir(&real_root, &scan_root.join("Linked Apps"));
 
         let apps = collect_apps(&scan_root);
@@ -372,9 +294,9 @@ mod tests {
     }
 
     #[test]
-    fn excludes_app_by_bundle_filename_even_when_display_name_differs() {
+    fn excludes_app_by_bundle_filename() {
         let tmp = TempDir::new("exclude-filename");
-        create_app(tmp.path(), "Client Riot.app", Some("Riot Client"));
+        create_app(tmp.path(), "Client Riot.app");
         let (tx, rx) = mpsc::sync_channel(16);
         let empty = Vec::<String>::new();
         walk_apps(
